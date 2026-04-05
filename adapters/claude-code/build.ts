@@ -3,7 +3,7 @@
 // run hook-bridge.ts directly via `bun` at hook invocation time.
 // This script only generates the two manifest files needed by Claude Code.
 
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { mkdirSync, writeFileSync } from 'node:fs'
 
 const root = join(import.meta.dir, '../..')
@@ -32,7 +32,14 @@ for (const event of hookEvents) {
 writeFileSync(join(root, 'hooks/hooks.json'), JSON.stringify({ hooks: hooksJson }, null, 2))
 console.log('Written hooks/hooks.json')
 
-// 2. Generate .claude-plugin/plugin.json
+// 3. Write omo config (LM Studio routing + runtime_fallback)
+const { loadClaudeCodeConfig, getOmoConfigPath } = await import('./config-bridge.ts')
+const omoConfigPath = getOmoConfigPath()
+mkdirSync(dirname(omoConfigPath), { recursive: true })
+writeFileSync(omoConfigPath, JSON.stringify(loadClaudeCodeConfig(), null, 2))
+console.log('Written', omoConfigPath)
+
+// 4. Generate .claude-plugin/plugin.json
 mkdirSync(join(root, '.claude-plugin'), { recursive: true })
 const pkg = await import('../../package.json')
 writeFileSync(join(root, '.claude-plugin/plugin.json'), JSON.stringify({

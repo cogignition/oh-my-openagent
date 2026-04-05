@@ -55,6 +55,7 @@
   },
   "homepage": "https://github.com/code-yeongyu/oh-my-openagent#readme",
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.92",
     "@ast-grep/cli": "^0.41.1",
     "@ast-grep/napi": "^0.41.1",
     "@clack/prompts": "^0.11.0",
