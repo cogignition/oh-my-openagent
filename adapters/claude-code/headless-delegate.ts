@@ -16,13 +16,13 @@ const QUICK_CATEGORIES = new Set(['quick', 'unspecified-low'])
 const DEEP_CATEGORIES  = new Set(['deep', 'ultrabrain', 'unspecified-high'])
 
 function getLmStudioBaseUrl(): string {
-  const url = process.env.OMC_PROVIDER_LOW_URL ?? 'http://localhost:1234/v1/chat/completions'
+  const url = process.env.OMO_PROVIDER_LOW_URL ?? 'http://localhost:1234/v1/chat/completions'
   // Normalize: strip /chat/completions or /messages suffix to get base
   return url.replace(/\/(chat\/completions|messages)\/?$/, '')
 }
 
 function getLmStudioModel(): string {
-  const full = process.env.OMC_CATEGORY_QUICK_MODEL ?? 'lmstudio/google/gemma-4-26b-a4b'
+  const full = process.env.OMO_CATEGORY_QUICK_MODEL ?? 'lmstudio/google/gemma-4-26b-a4b'
   // Strip provider prefix: "lmstudio/deepseek-..." → "deepseek-..."
   return full.includes('/') ? full.split('/').slice(1).join('/') : full
 }
@@ -30,7 +30,7 @@ function getLmStudioModel(): string {
 async function callLmStudio(opts: DelegateOptions): Promise<string> {
   const baseUrl = getLmStudioBaseUrl()
   const model   = getLmStudioModel()
-  const apiKey  = process.env.OMC_PROVIDER_LOW_KEY ?? 'lmstudio'
+  const apiKey  = process.env.OMO_PROVIDER_LOW_KEY ?? 'lmstudio'
   const timeout = opts.timeoutMs ?? 30_000
 
   const body: Record<string, unknown> = {

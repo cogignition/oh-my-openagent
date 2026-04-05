@@ -15,16 +15,16 @@ export function loadClaudeCodeConfig(): Partial<OhMyOpenCodeConfig> {
   } catch { /* missing file is fine */ }
 
   // 2. Build env overlay if LM Studio URL present
-  const lowUrl = process.env.OMC_PROVIDER_LOW_URL
+  const lowUrl = process.env.OMO_PROVIDER_LOW_URL
   if (!lowUrl) return fileConfig
 
   const isLmStudio = lowUrl.includes('localhost:1234') || lowUrl.includes('127.0.0.1:1234')
   const providerPrefix = isLmStudio ? 'lmstudio' : 'openai'
 
-  const quickModel = process.env.OMC_CATEGORY_QUICK_MODEL ?? `${providerPrefix}/google/gemma-4-26b-a4b`
-  const deepModel  = process.env.OMC_CATEGORY_DEEP_MODEL  ?? 'anthropic/claude-opus-4-6'
-  const fallback   = process.env.OMC_CATEGORY_FALLBACK_MODEL ?? 'anthropic/claude-sonnet-4-6'
-  const timeout    = parseInt(process.env.OMC_FALLBACK_TIMEOUT_SECONDS ?? '15', 10)
+  const quickModel = process.env.OMO_CATEGORY_QUICK_MODEL ?? `${providerPrefix}/google/gemma-4-26b-a4b`
+  const deepModel  = process.env.OMO_CATEGORY_DEEP_MODEL  ?? 'anthropic/claude-opus-4-6'
+  const fallback   = process.env.OMO_CATEGORY_FALLBACK_MODEL ?? 'anthropic/claude-sonnet-4-6'
+  const timeout    = parseInt(process.env.OMO_FALLBACK_TIMEOUT_SECONDS ?? '15', 10)
 
   const envConfig: Partial<OhMyOpenCodeConfig> = {
     categories: {

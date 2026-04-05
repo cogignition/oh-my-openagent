@@ -60,12 +60,12 @@ Add the hook bridge to `~/.claude/settings.json` for each event, and set env var
 ```json
 {
   "env": {
-    "OMC_PROVIDER_LOW_URL": "http://localhost:1234/v1/messages",
-    "OMC_PROVIDER_LOW_KEY": "lmstudio",
-    "OMC_PROVIDER_LOW_PROTOCOL": "anthropic",
-    "OMC_CATEGORY_QUICK_MODEL": "lmstudio/google/gemma-4-26b-a4b",
-    "OMC_METRICS_ENABLED": "true",
-    "OMC_METRICS_ENDPOINT": "http://localhost:4318"
+    "OMO_PROVIDER_LOW_URL": "http://localhost:1234/v1/messages",
+    "OMO_PROVIDER_LOW_KEY": "lmstudio",
+    "OMO_PROVIDER_LOW_PROTOCOL": "anthropic",
+    "OMO_CATEGORY_QUICK_MODEL": "lmstudio/google/gemma-4-26b-a4b",
+    "OMO_METRICS_ENABLED": "true",
+    "OMO_METRICS_ENDPOINT": "http://localhost:4318"
   }
 }
 ```
@@ -80,14 +80,14 @@ Hook command (via wrapper script):
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `OMC_PROVIDER_LOW_URL` | — | LM Studio base URL (Anthropic-compat) |
-| `OMC_PROVIDER_LOW_KEY` | `lmstudio` | API key for LM Studio |
-| `OMC_PROVIDER_LOW_PROTOCOL` | `openai` | Protocol hint (`anthropic` or `openai`) |
-| `OMC_CATEGORY_QUICK_MODEL` | `lmstudio/google/gemma-4-26b-a4b` | Model for quick/unspecified-low tasks |
-| `OMC_CATEGORY_DEEP_MODEL` | `anthropic/claude-opus-4-6` | Model for deep/ultrabrain tasks |
-| `OMC_CATEGORY_FALLBACK_MODEL` | `anthropic/claude-sonnet-4-6` | Fallback when LM Studio is offline |
-| `OMC_METRICS_ENABLED` | `false` | Enable OTLP metrics emission |
-| `OMC_METRICS_ENDPOINT` | `http://localhost:4318` | OTLP HTTP collector endpoint |
+| `OMO_PROVIDER_LOW_URL` | — | LM Studio base URL (Anthropic-compat) |
+| `OMO_PROVIDER_LOW_KEY` | `lmstudio` | API key for LM Studio |
+| `OMO_PROVIDER_LOW_PROTOCOL` | `openai` | Protocol hint (`anthropic` or `openai`) |
+| `OMO_CATEGORY_QUICK_MODEL` | `lmstudio/google/gemma-4-26b-a4b` | Model for quick/unspecified-low tasks |
+| `OMO_CATEGORY_DEEP_MODEL` | `anthropic/claude-opus-4-6` | Model for deep/ultrabrain tasks |
+| `OMO_CATEGORY_FALLBACK_MODEL` | `anthropic/claude-sonnet-4-6` | Fallback when LM Studio is offline |
+| `OMO_METRICS_ENABLED` | `false` | Enable OTLP metrics emission |
+| `OMO_METRICS_ENDPOINT` | `http://localhost:4318` | OTLP HTTP collector endpoint |
 
 ## Metrics
 

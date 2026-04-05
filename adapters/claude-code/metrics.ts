@@ -1,8 +1,8 @@
 /**
  * OTLP metrics instrumentation for the Claude Code adapter.
  *
- * Emits to OMC_METRICS_ENDPOINT (default: http://localhost:4318) when
- * OMC_METRICS_ENABLED=true. No-ops silently when disabled or unreachable.
+ * Emits to OMO_METRICS_ENDPOINT (default: http://localhost:4318) when
+ * OMO_METRICS_ENABLED=true. No-ops silently when disabled or unreachable.
  *
  * Instruments:
  *   omo_hook_events_total          — counter  {event_name}
@@ -17,8 +17,8 @@ import { resourceFromAttributes } from '@opentelemetry/resources'
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions'
 import type { Counter, Histogram, Meter } from '@opentelemetry/api'
 
-const ENABLED = process.env.OMC_METRICS_ENABLED === 'true'
-const ENDPOINT = (process.env.OMC_METRICS_ENDPOINT ?? 'http://localhost:4318').replace(/\/$/, '')
+const ENABLED = process.env.OMO_METRICS_ENABLED === 'true'
+const ENDPOINT = (process.env.OMO_METRICS_ENDPOINT ?? 'http://localhost:4318').replace(/\/$/, '')
 const EXPORT_INTERVAL_MS = 15_000
 
 let _meter: Meter | null = null
@@ -105,8 +105,8 @@ function fallbackCounter(): Counter | null {
 
 // Public API — all no-op when metrics disabled
 
-export function recordHookEvent(eventName: string): void {
-  try { hookCounter()?.add(1, { event_name: eventName }) } catch {}
+export function recordHookEvent(eventName: string, routed = false): void {
+  try { hookCounter()?.add(1, { event_name: eventName, routed: String(routed) }) } catch {}
 }
 
 export function recordDelegateCall(opts: {
