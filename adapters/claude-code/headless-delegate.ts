@@ -1,6 +1,6 @@
-// Headless delegate: routes tasks to LM Studio (quick) or Claude via Agent SDK (deep/default).
-// LM Studio uses Anthropic-compatible endpoint: POST http://localhost:1234/v1/messages
-// Claude tasks use @anthropic-ai/claude-agent-sdk query()
+// Headless delegate: routes all tasks through @anthropic-ai/claude-agent-sdk.
+// Quick tasks point the SDK at LM Studio via ANTHROPIC_BASE_URL override (gemma4 + tools).
+// Deep tasks use the default Anthropic endpoint (Claude Opus + tools).
 
 import { recordDelegateCall, recordFallback } from './metrics.js'
 
@@ -16,81 +16,73 @@ const QUICK_CATEGORIES = new Set(['quick', 'unspecified-low'])
 const DEEP_CATEGORIES  = new Set(['deep', 'ultrabrain', 'unspecified-high'])
 
 function getLmStudioBaseUrl(): string {
-  const url = process.env.OMO_PROVIDER_LOW_URL ?? 'http://localhost:1234/v1/chat/completions'
-  // Normalize: strip /chat/completions or /messages suffix to get base
-  return url.replace(/\/(chat\/completions|messages)\/?$/, '')
+  const url = process.env.OMO_PROVIDER_LOW_URL ?? 'http://localhost:1234/v1/messages'
+  // Anthropic SDK appends /v1 itself — return just protocol+host
+  const { protocol, host } = new URL(url)
+  return `${protocol}//${host}`
 }
 
 function getLmStudioModel(): string {
   const full = process.env.OMO_CATEGORY_QUICK_MODEL ?? 'lmstudio/google/gemma-4-26b-a4b'
-  // Strip provider prefix: "lmstudio/deepseek-..." → "deepseek-..."
-  return full.includes('/') ? full.split('/').slice(1).join('/') : full
+  // Strip provider prefix: 'lmstudio/google/gemma-4-26b-a4b' → 'google/gemma-4-26b-a4b'
+  const knownPrefixes = ['lmstudio', 'anthropic', 'openai', 'ollama', 'mistral']
+  const parts = full.split('/')
+  if (knownPrefixes.includes(parts[0])) return parts.slice(1).join('/')
+  return full
 }
 
-async function callLmStudio(opts: DelegateOptions): Promise<string> {
-  const baseUrl = getLmStudioBaseUrl()
-  const model   = getLmStudioModel()
-  const apiKey  = process.env.OMO_PROVIDER_LOW_KEY ?? 'lmstudio'
-  const timeout = opts.timeoutMs ?? 30_000
-
-  const body: Record<string, unknown> = {
-    model,
-    messages: [{ role: 'user', content: opts.task }],
-    max_tokens: 4096,
-  }
-  if (opts.systemPrompt) body.system = opts.systemPrompt
-
-  const res = await fetch(`${baseUrl}/messages`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-    },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(timeout),
-  })
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(`LM Studio ${res.status}: ${text}`)
-  }
-
-  const data = await res.json() as {
-    content?: Array<{ type: string; text?: string }>
-    choices?: Array<{ message?: { content?: string } }>
-  }
-
-  // Anthropic-compat format
-  if (Array.isArray(data.content)) {
-    return data.content.filter(b => b.type === 'text' && b.text).map(b => b.text!).join('')
-  }
-  // OpenAI-compat fallback
-  if (Array.isArray(data.choices)) {
-    return data.choices[0]?.message?.content ?? ''
-  }
-  return ''
-}
-
-async function callClaudeAgent(opts: DelegateOptions & { model?: string }): Promise<string> {
+async function callAgent(opts: DelegateOptions & {
+  model: string
+  baseUrl?: string
+  apiKey?: string
+}): Promise<string> {
   const { query } = await import('@anthropic-ai/claude-agent-sdk')
-  const model = opts.model
-    ?? (DEEP_CATEGORIES.has(opts.category ?? '') ? 'claude-opus-4-6' : 'claude-sonnet-4-6')
 
-  const chunks: string[] = []
-  for await (const msg of query({
-    prompt: opts.task,
-    options: {
-      cwd: opts.directory,
-      maxTurns: 1,
-      allowedTools: [],
-      model,
-    } as Parameters<typeof query>[0]['options'],
-  })) {
-    if (msg && typeof msg === 'object' && 'result' in msg && typeof msg.result === 'string') {
-      chunks.push(msg.result)
+  // Temporarily override env so the SDK client picks up LM Studio URL
+  const prevBaseUrl = process.env.ANTHROPIC_BASE_URL
+  const prevApiKey  = process.env.ANTHROPIC_API_KEY
+  if (opts.baseUrl) process.env.ANTHROPIC_BASE_URL = opts.baseUrl
+  if (opts.apiKey)  process.env.ANTHROPIC_API_KEY  = opts.apiKey
+
+  try {
+    const chunks: string[] = []
+    for await (const msg of query({
+      prompt: opts.task,
+      options: {
+        cwd: opts.directory,
+        model: opts.model,
+        maxTurns: 10,
+        ...(opts.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
+      } as Parameters<typeof query>[0]['options'],
+    })) {
+      if (msg && typeof msg === 'object' && 'result' in msg && typeof msg.result === 'string') {
+        chunks.push(msg.result)
+      }
+    }
+    return chunks.join('')
+  } finally {
+    // Restore previous env state
+    if (opts.baseUrl) {
+      if (prevBaseUrl === undefined) delete process.env.ANTHROPIC_BASE_URL
+      else process.env.ANTHROPIC_BASE_URL = prevBaseUrl
+    }
+    if (opts.apiKey) {
+      if (prevApiKey === undefined) delete process.env.ANTHROPIC_API_KEY
+      else process.env.ANTHROPIC_API_KEY = prevApiKey
     }
   }
-  return chunks.join('')
+}
+
+function isOfflineError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  return (
+    err.message.includes('ECONNREFUSED') ||
+    err.message.includes('fetch failed') ||
+    err.message.includes('Unable to connect') ||
+    err.message.includes('timed out') ||
+    (err as NodeJS.ErrnoException).code === 'ConnectionRefused' ||
+    err.name === 'TimeoutError'
+  )
 }
 
 export async function runHeadlessDelegate(opts: DelegateOptions): Promise<string> {
@@ -98,25 +90,19 @@ export async function runHeadlessDelegate(opts: DelegateOptions): Promise<string
   const start = Date.now()
 
   if (QUICK_CATEGORIES.has(category)) {
-    const model = getLmStudioModel()
+    const model   = getLmStudioModel()
+    const baseUrl = getLmStudioBaseUrl()
+    const apiKey  = process.env.OMO_PROVIDER_LOW_KEY ?? 'lmstudio'
     try {
-      const result = await callLmStudio(opts)
+      const result = await callAgent({ ...opts, model, baseUrl, apiKey })
       recordDelegateCall({ category, model, status: 'success', latencyMs: Date.now() - start })
       return result
     } catch (err) {
-      const isOffline = err instanceof Error &&
-        (err.message.includes('ECONNREFUSED') ||
-         err.message.includes('fetch failed') ||
-         err.message.includes('Unable to connect') ||
-         (err as NodeJS.ErrnoException).code === 'ConnectionRefused' ||
-         err.name === 'TimeoutError' ||
-         err.message.includes('timed out'))
-
-      if (isOffline) {
+      if (isOfflineError(err)) {
         process.stderr.write(`[headless-delegate] LM Studio offline, falling back to Haiku: ${err}\n`)
         recordFallback(category, 'offline')
         const fallbackModel = 'claude-haiku-4-5-20251001'
-        const result = await callClaudeAgent({ ...opts, model: fallbackModel })
+        const result = await callAgent({ ...opts, model: fallbackModel })
         recordDelegateCall({ category, model: fallbackModel, status: 'fallback', latencyMs: Date.now() - start })
         return result
       }
@@ -126,7 +112,7 @@ export async function runHeadlessDelegate(opts: DelegateOptions): Promise<string
   }
 
   const deepModel = DEEP_CATEGORIES.has(category) ? 'claude-opus-4-6' : 'claude-sonnet-4-6'
-  const result = await callClaudeAgent(opts)
+  const result = await callAgent({ ...opts, model: deepModel })
   recordDelegateCall({ category, model: deepModel, status: 'success', latencyMs: Date.now() - start })
   return result
 }
