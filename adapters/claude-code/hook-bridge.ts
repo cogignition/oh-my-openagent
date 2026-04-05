@@ -2,6 +2,8 @@ import { readStdin } from './stdin-reader.js'
 import { mapEvent, type ClaudeCodeInput } from './event-mapper.js'
 import { getPlugin } from './entry.js'
 import { recordHookEvent, shutdown } from './metrics.js'
+import { classifyPrompt } from './prompt-router.js'
+import { runHeadlessDelegate } from './headless-delegate.js'
 
 export async function run(): Promise<void> {
   const raw = await readStdin()
@@ -9,6 +11,24 @@ export async function run(): Promise<void> {
   try { parsed = JSON.parse(raw || '{}') } catch { /* ignore */ }
 
   const directory = parsed.directory ?? process.cwd()
+
+  // Prompt routing: intercept UserPromptSubmit with known prefixes (@quick, @local, @deep, etc.)
+  if (parsed.hook_event_name === 'UserPromptSubmit') {
+    const prompt = typeof parsed.prompt === 'string' ? parsed.prompt : ''
+    const decision = classifyPrompt(prompt)
+    if (decision.route !== 'pass') {
+      recordHookEvent(parsed.hook_event_name, true)
+      try {
+        const result = await runHeadlessDelegate({ task: decision.prompt, category: decision.route, directory })
+        process.stdout.write(JSON.stringify({ continue: false, stopReason: result }) + '\n')
+      } catch (err) {
+        process.stderr.write(`[hook-bridge] delegate error: ${err}\n`)
+        process.stdout.write(JSON.stringify({ continue: true }) + '\n')
+      }
+      return
+    }
+  }
+
   const target = mapEvent(parsed)
 
   recordHookEvent(parsed.hook_event_name)
