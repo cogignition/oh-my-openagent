@@ -1,6 +1,7 @@
 import { readStdin } from './stdin-reader.js'
 import { mapEvent, type ClaudeCodeInput } from './event-mapper.js'
 import { getPlugin } from './entry.js'
+import { recordHookEvent, shutdown } from './metrics.js'
 
 export async function run(): Promise<void> {
   const raw = await readStdin()
@@ -9,6 +10,8 @@ export async function run(): Promise<void> {
 
   const directory = parsed.directory ?? process.cwd()
   const target = mapEvent(parsed)
+
+  recordHookEvent(parsed.hook_event_name)
 
   if (target.handler === 'skip') {
     process.stdout.write(JSON.stringify({ continue: true }) + '\n')
@@ -46,8 +49,9 @@ function extractMessage(output: Record<string, unknown>): string | undefined {
 }
 
 // Auto-run when executed directly
-run().catch(err => {
-  process.stderr.write(`[hook-bridge] fatal: ${err}\n`)
-  process.stdout.write(JSON.stringify({ continue: true }) + '\n')
-  process.exit(0)
-})
+run()
+  .catch(err => {
+    process.stderr.write(`[hook-bridge] fatal: ${err}\n`)
+    process.stdout.write(JSON.stringify({ continue: true }) + '\n')
+  })
+  .finally(() => shutdown())
