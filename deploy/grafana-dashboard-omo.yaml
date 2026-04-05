@@ -1,0 +1,217 @@
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDashboard
+metadata:
+  name: omo-claude-code-adapter
+  namespace: grafana
+  labels:
+    app: oh-my-openagent
+spec:
+  instanceSelector:
+    matchLabels:
+      dashboards: grafana
+  json: |
+    {
+      "title": "OMO Claude Code Adapter",
+      "uid": "omo-claude-code",
+      "schemaVersion": 38,
+      "refresh": "15s",
+      "time": { "from": "now-1h", "to": "now" },
+      "templating": {
+        "list": [
+          {
+            "name": "category",
+            "type": "query",
+            "datasource": { "type": "prometheus", "uid": "prometheus" },
+            "query": "label_values(omo_delegate_calls_total, category)",
+            "includeAll": true,
+            "multi": true,
+            "current": { "text": "All", "value": "$__all" }
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "row",
+          "title": "Hook Events",
+          "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 }
+        },
+        {
+          "id": 2,
+          "title": "Hook Events / min",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 1, "w": 12, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum by (event_name) (rate(omo_hook_events_total[1m]) * 60)",
+              "legendFormat": "{{event_name}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "reqpm", "custom": { "fillOpacity": 10 } }
+          }
+        },
+        {
+          "id": 3,
+          "title": "Total Hook Events",
+          "type": "stat",
+          "gridPos": { "x": 12, "y": 1, "w": 6, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            { "expr": "sum(omo_hook_events_total)", "legendFormat": "Total" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "short" } }
+        },
+        {
+          "id": 4,
+          "title": "Events by Type",
+          "type": "piechart",
+          "gridPos": { "x": 18, "y": 1, "w": 6, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum by (event_name) (omo_hook_events_total)",
+              "legendFormat": "{{event_name}}"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "type": "row",
+          "title": "Delegate Calls",
+          "gridPos": { "x": 0, "y": 9, "w": 24, "h": 1 }
+        },
+        {
+          "id": 6,
+          "title": "Delegate Calls / min",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 10, "w": 12, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum by (category, model, status) (rate(omo_delegate_calls_total{category=~\"$category\"}[1m]) * 60)",
+              "legendFormat": "{{category}} / {{model}} [{{status}}]"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "reqpm", "custom": { "fillOpacity": 10 } }
+          }
+        },
+        {
+          "id": 7,
+          "title": "Delegate Latency (p50 / p95 / p99)",
+          "type": "timeseries",
+          "gridPos": { "x": 12, "y": 10, "w": 12, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.50, sum by (le, category) (rate(omo_delegate_latency_ms_milliseconds_bucket{category=~\"$category\"}[5m])))",
+              "legendFormat": "p50 {{category}}"
+            },
+            {
+              "expr": "histogram_quantile(0.95, sum by (le, category) (rate(omo_delegate_latency_ms_milliseconds_bucket{category=~\"$category\"}[5m])))",
+              "legendFormat": "p95 {{category}}"
+            },
+            {
+              "expr": "histogram_quantile(0.99, sum by (le, category) (rate(omo_delegate_latency_ms_milliseconds_bucket{category=~\"$category\"}[5m])))",
+              "legendFormat": "p99 {{category}}"
+            }
+          ],
+          "fieldConfig": { "defaults": { "unit": "ms" } }
+        },
+        {
+          "id": 8,
+          "type": "row",
+          "title": "Fallbacks & Errors",
+          "gridPos": { "x": 0, "y": 18, "w": 24, "h": 1 }
+        },
+        {
+          "id": 9,
+          "title": "LM Studio Fallbacks / min",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 19, "w": 12, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum by (category, reason) (rate(omo_lm_studio_fallbacks_total[1m]) * 60)",
+              "legendFormat": "{{category}} ({{reason}})"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqpm",
+              "custom": { "fillOpacity": 10 },
+              "color": { "fixedColor": "orange", "mode": "fixed" }
+            }
+          }
+        },
+        {
+          "id": 10,
+          "title": "Error Rate",
+          "type": "timeseries",
+          "gridPos": { "x": 12, "y": 19, "w": 12, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum by (category) (rate(omo_delegate_calls_total{status=\"error\"}[1m]) * 60)",
+              "legendFormat": "errors {{category}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqpm",
+              "custom": { "fillOpacity": 10 },
+              "color": { "fixedColor": "red", "mode": "fixed" }
+            }
+          }
+        },
+        {
+          "id": 11,
+          "title": "Total Fallbacks",
+          "type": "stat",
+          "gridPos": { "x": 0, "y": 27, "w": 6, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            { "expr": "sum(omo_lm_studio_fallbacks_total) or vector(0)", "legendFormat": "Fallbacks" }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": 0 },
+                  { "color": "orange", "value": 1 },
+                  { "color": "red", "value": 5 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 12,
+          "title": "Success Rate",
+          "type": "stat",
+          "gridPos": { "x": 6, "y": 27, "w": 6, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum(rate(omo_delegate_calls_total{status=\"success\"}[5m])) / sum(rate(omo_delegate_calls_total[5m])) * 100",
+              "legendFormat": "Success %"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "thresholds": {
+                "steps": [
+                  { "color": "red", "value": 0 },
+                  { "color": "orange", "value": 90 },
+                  { "color": "green", "value": 99 }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
