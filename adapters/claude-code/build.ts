@@ -39,7 +39,15 @@ mkdirSync(dirname(omoConfigPath), { recursive: true })
 writeFileSync(omoConfigPath, JSON.stringify(loadClaudeCodeConfig(), null, 2))
 console.log('Written', omoConfigPath)
 
-// 4. Generate .claude-plugin/plugin.json
+// 4. Render omo agents → ~/.claude/agents/omo-*.md
+const { renderOmoAgents } = await import('./agent-renderer.ts')
+const cfg = loadClaudeCodeConfig()
+const quickModel = (cfg.categories?.quick as { model?: string } | undefined)?.model ?? 'lmstudio/google/gemma-4-26b-a4b'
+const deepModel  = (cfg.categories?.deep  as { model?: string } | undefined)?.model ?? 'anthropic/claude-opus-4-6'
+await renderOmoAgents({ quickModel, deepModel, directory: root })
+console.log('Rendered omo agents → ~/.claude/agents/omo-*.md')
+
+// 5. Generate .claude-plugin/plugin.json
 mkdirSync(join(root, '.claude-plugin'), { recursive: true })
 const pkg = await import('../../package.json')
 writeFileSync(join(root, '.claude-plugin/plugin.json'), JSON.stringify({
