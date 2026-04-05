@@ -2,7 +2,7 @@ import { writeFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import OhMyOpenCodePlugin from '../../src/index.js'
 import { createContextShim } from './context-shim.js'
-import { loadClaudeCodeConfig, getOmoConfigPath, getOmoConfigSyncPath } from './config-bridge.js'
+import { loadClaudeCodeConfig, getOmoConfigPath } from './config-bridge.js'
 
 type PluginInstance = Awaited<ReturnType<typeof OhMyOpenCodePlugin>>
 
@@ -11,13 +11,9 @@ const cache = new Map<string, PluginInstance>()
 function writeOmoConfig(): void {
   try {
     const cfg = JSON.stringify(loadClaudeCodeConfig(), null, 2)
-    const canonical = getOmoConfigPath()
-    mkdirSync(dirname(canonical), { recursive: true })
-    writeFileSync(canonical, cfg)
-    // Sync copy so omo's loadPluginConfig() (which reads opencode config dir) still picks it up
-    const syncPath = getOmoConfigSyncPath()
-    mkdirSync(dirname(syncPath), { recursive: true })
-    writeFileSync(syncPath, cfg)
+    const p = getOmoConfigPath()
+    mkdirSync(dirname(p), { recursive: true })
+    writeFileSync(p, cfg)
   } catch (err) {
     process.stderr.write(`[entry] config write failed: ${err}\n`)
   }

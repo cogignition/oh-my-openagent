@@ -49,12 +49,6 @@ export function loadClaudeCodeConfig(): Partial<OhMyOpenCodeConfig> {
   }
 }
 
-/** Canonical config location: adjacent to .claude, not in opencode. */
 export function getOmoConfigPath(): string {
-  return join(homedir(), '.claude', 'oh-my-openagent.json')
-}
-
-/** Sync copy location so omo's loadPluginConfig() can still read it. */
-export function getOmoConfigSyncPath(): string {
   return join(homedir(), '.config', 'opencode', 'oh-my-openagent.json')
 }
