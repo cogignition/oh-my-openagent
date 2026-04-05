@@ -2,6 +2,8 @@
 // LM Studio uses Anthropic-compatible endpoint: POST http://localhost:1234/v1/messages
 // Claude tasks use @anthropic-ai/claude-agent-sdk query()
 
+import { recordDelegateCall, recordFallback } from './metrics.js'
+
 export type DelegateOptions = {
   task: string
   category?: string
@@ -92,22 +94,39 @@ async function callClaudeAgent(opts: DelegateOptions & { model?: string }): Prom
 }
 
 export async function runHeadlessDelegate(opts: DelegateOptions): Promise<string> {
-  if (QUICK_CATEGORIES.has(opts.category ?? 'quick')) {
+  const category = opts.category ?? 'quick'
+  const start = Date.now()
+
+  if (QUICK_CATEGORIES.has(category)) {
+    const model = getLmStudioModel()
     try {
-      return await callLmStudio(opts)
+      const result = await callLmStudio(opts)
+      recordDelegateCall({ category, model, status: 'success', latencyMs: Date.now() - start })
+      return result
     } catch (err) {
       const isOffline = err instanceof Error &&
         (err.message.includes('ECONNREFUSED') ||
          err.message.includes('fetch failed') ||
+         err.message.includes('Unable to connect') ||
+         (err as NodeJS.ErrnoException).code === 'ConnectionRefused' ||
          err.name === 'TimeoutError' ||
          err.message.includes('timed out'))
 
       if (isOffline) {
         process.stderr.write(`[headless-delegate] LM Studio offline, falling back to Haiku: ${err}\n`)
-        return callClaudeAgent({ ...opts, model: 'claude-haiku-4-5-20251001' })
+        recordFallback(category, 'offline')
+        const fallbackModel = 'claude-haiku-4-5-20251001'
+        const result = await callClaudeAgent({ ...opts, model: fallbackModel })
+        recordDelegateCall({ category, model: fallbackModel, status: 'fallback', latencyMs: Date.now() - start })
+        return result
       }
+      recordDelegateCall({ category, model, status: 'error', latencyMs: Date.now() - start })
       throw err
     }
   }
-  return callClaudeAgent(opts)
+
+  const deepModel = DEEP_CATEGORIES.has(category) ? 'claude-opus-4-6' : 'claude-sonnet-4-6'
+  const result = await callClaudeAgent(opts)
+  recordDelegateCall({ category, model: deepModel, status: 'success', latencyMs: Date.now() - start })
+  return result
 }
