@@ -10,6 +10,8 @@ export type DelegateOptions = {
   directory: string
   timeoutMs?: number
   systemPrompt?: string
+  /** Agent name (e.g. 'omo-sisyphus-junior') — uses its focused system prompt instead of full Claude Code context */
+  agent?: string
 }
 
 const QUICK_CATEGORIES = new Set(['quick', 'unspecified-low'])
@@ -52,6 +54,7 @@ async function callAgent(opts: DelegateOptions & {
         cwd: opts.directory,
         model: opts.model,
         maxTurns: 10,
+        ...(opts.agent       ? { agent: opts.agent }             : {}),
         ...(opts.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
       } as Parameters<typeof query>[0]['options'],
     })) {
@@ -93,8 +96,11 @@ export async function runHeadlessDelegate(opts: DelegateOptions): Promise<string
     const model   = getLmStudioModel()
     const baseUrl = getLmStudioBaseUrl()
     const apiKey  = process.env.OMO_PROVIDER_LOW_KEY ?? 'lmstudio'
+    // Optional: set OMO_QUICK_AGENT=omo-explore (or any omo-* agent) to use that agent's
+    // focused system prompt and avoid sending the full ~46k Claude Code context to LM Studio.
+    const agent = process.env.OMO_QUICK_AGENT || undefined
     try {
-      const result = await callAgent({ ...opts, model, baseUrl, apiKey })
+      const result = await callAgent({ ...opts, model, baseUrl, apiKey, agent })
       recordDelegateCall({ category, model, status: 'success', latencyMs: Date.now() - start })
       return result
     } catch (err) {
