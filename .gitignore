@@ -30,6 +30,13 @@ npm-debug.log*
 package-lock.json
 yarn.lock
 
+# Planning artifacts
+CLAUDE-CODE-ADAPTER-PLAN.md
+OMO-Claude-Code-Executive-Summary.docx
+PROMPT.md
+.memory/
+.omc/
+
 # Environment
 .env
 .env.local
