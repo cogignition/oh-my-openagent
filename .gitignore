@@ -5,6 +5,7 @@ node_modules/
 
 # Build output
 dist/
+bridge/
 
 # Platform binaries (built, not committed)
 packages/*/bin/oh-my-opencode

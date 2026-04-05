@@ -1,0 +1,46 @@
+// Build script for the Claude Code adapter.
+// The omo codebase is Bun-native (imports from "bun"), so we skip bundling and
+// run hook-bridge.ts directly via `bun` at hook invocation time.
+// This script only generates the two manifest files needed by Claude Code.
+
+import { join } from 'node:path'
+import { mkdirSync, writeFileSync } from 'node:fs'
+
+const root = join(import.meta.dir, '../..')
+const bunBin = process.execPath // absolute path to the running bun binary
+const bridgeEntry = join(root, 'adapters/claude-code/hook-bridge.ts')
+
+// 1. Generate hooks/hooks.json
+mkdirSync(join(root, 'hooks'), { recursive: true })
+const hookEvents = [
+  'SessionStart',
+  'UserPromptSubmit',
+  'PreToolUse',
+  'PostToolUse',
+  'PostToolUseFailure',
+  'PreCompact',
+  'SubagentStart',
+  'SubagentStop',
+  'Stop',
+  'SessionEnd',
+  'PermissionRequest',
+]
+const hooksJson: Record<string, unknown[]> = {}
+for (const event of hookEvents) {
+  hooksJson[event] = [{ type: 'command', command: `"${bunBin}" "${bridgeEntry}"` }]
+}
+writeFileSync(join(root, 'hooks/hooks.json'), JSON.stringify({ hooks: hooksJson }, null, 2))
+console.log('Written hooks/hooks.json')
+
+// 2. Generate .claude-plugin/plugin.json
+mkdirSync(join(root, '.claude-plugin'), { recursive: true })
+const pkg = await import('../../package.json')
+writeFileSync(join(root, '.claude-plugin/plugin.json'), JSON.stringify({
+  name: 'oh-my-openagent',
+  version: pkg.version ?? '3.15.1',
+  description: 'oh-my-openagent Claude Code adapter',
+  entry: bridgeEntry,
+  runtime: bunBin,
+}, null, 2))
+console.log('Written .claude-plugin/plugin.json')
+console.log('Done. Hooks will invoke: ' + bunBin + ' ' + bridgeEntry)

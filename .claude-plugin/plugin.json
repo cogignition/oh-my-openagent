@@ -1,0 +1,7 @@
+{
+  "name": "oh-my-openagent",
+  "version": "3.15.1",
+  "description": "oh-my-openagent Claude Code adapter",
+  "entry": "/Users/cognomen/claude_workspace/repos/oh-my-openagent/adapters/claude-code/hook-bridge.ts",
+  "runtime": "/Users/cognomen/.bun/bin/bun"
+}

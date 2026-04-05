@@ -1,0 +1,70 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "\"/Users/cognomen/.bun/bin/bun\" \"/Users/cognomen/claude_workspace/repos/oh-my-openagent/adapters/claude-code/hook-bridge.ts\""
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "type": "command",
+        "command": "\"/Users/cognomen/.bun/bin/bun\" \"/Users/cognomen/claude_workspace/repos/oh-my-openagent/adapters/claude-code/hook-bridge.ts\""
+      }
+    ],
+    "PreToolUse": [
+      {
+        "type": "command",
+        "command": "\"/Users/cognomen/.bun/bin/bun\" \"/Users/cognomen/claude_workspace/repos/oh-my-openagent/adapters/claude-code/hook-bridge.ts\""
+      }
+    ],
+    "PostToolUse": [
+      {
+        "type": "command",
+        "command": "\"/Users/cognomen/.bun/bin/bun\" \"/Users/cognomen/claude_workspace/repos/oh-my-openagent/adapters/claude-code/hook-bridge.ts\""
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "type": "command",
+        "command": "\"/Users/cognomen/.bun/bin/bun\" \"/Users/cognomen/claude_workspace/repos/oh-my-openagent/adapters/claude-code/hook-bridge.ts\""
+      }
+    ],
+    "PreCompact": [
+      {
+        "type": "command",
+        "command": "\"/Users/cognomen/.bun/bin/bun\" \"/Users/cognomen/claude_workspace/repos/oh-my-openagent/adapters/claude-code/hook-bridge.ts\""
+      }
+    ],
+    "SubagentStart": [
+      {
+        "type": "command",
+        "command": "\"/Users/cognomen/.bun/bin/bun\" \"/Users/cognomen/claude_workspace/repos/oh-my-openagent/adapters/claude-code/hook-bridge.ts\""
+      }
+    ],
+    "SubagentStop": [
+      {
+        "type": "command",
+        "command": "\"/Users/cognomen/.bun/bin/bun\" \"/Users/cognomen/claude_workspace/repos/oh-my-openagent/adapters/claude-code/hook-bridge.ts\""
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "\"/Users/cognomen/.bun/bin/bun\" \"/Users/cognomen/claude_workspace/repos/oh-my-openagent/adapters/claude-code/hook-bridge.ts\""
+      }
+    ],
+    "SessionEnd": [
+      {
+        "type": "command",
+        "command": "\"/Users/cognomen/.bun/bin/bun\" \"/Users/cognomen/claude_workspace/repos/oh-my-openagent/adapters/claude-code/hook-bridge.ts\""
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "type": "command",
+        "command": "\"/Users/cognomen/.bun/bin/bun\" \"/Users/cognomen/claude_workspace/repos/oh-my-openagent/adapters/claude-code/hook-bridge.ts\""
+      }
+    ]
+  }
+}

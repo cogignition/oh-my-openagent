@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "outDir": "bridge",
+    "rootDir": "adapters/claude-code",
+    "resolveJsonModule": true
+  },
+  "include": ["adapters/claude-code/**/*"],
+  "exclude": ["node_modules", "dist", "bridge", "adapters/claude-code/build.ts"]
+}
