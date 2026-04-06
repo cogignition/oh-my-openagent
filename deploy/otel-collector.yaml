@@ -9,6 +9,12 @@
 #     exports its increment rather than a cumulative sum from a fresh origin. Without
 #     deltatocumulative, the Prometheus exporter sees the same cumulative value (1) from
 #     every fresh process and rate() stays 0.
+#
+# Access (no port-forward needed):
+#   Service type: NodePort — reachable directly via OrbStack node IP.
+#   OTLP HTTP: http://<node-ip>:30318/v1/metrics  (set OMO_METRICS_ENDPOINT)
+#   Node IP:   kubectl get node -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}'
+#   Default:   http://192.168.97.2:30318  (OrbStack k3d, stable unless cluster is recreated)
 
 apiVersion: v1
 kind: ConfigMap
@@ -32,7 +38,7 @@ data:
       # Required: convert delta metrics from short-lived hook-bridge processes to
       # cumulative before Prometheus scraping. Without this, rate() always returns 0.
       deltatocumulative:
-        max_stale: 5m
+        max_stale: 1h       # retain series for 1h of inactivity (5m was too short for sparse hook traffic)
         max_streams: 500
 
     exporters:
@@ -86,21 +92,38 @@ spec:
             name: otel-collector-config
 
 ---
+# Service type: NodePort so the OTLP HTTP endpoint is reachable from the host
+# without a kubectl port-forward daemon.
+#
+# With OrbStack, the k3d node is always at a stable IP (see: kubectl get node -o wide).
+# OMO_METRICS_ENDPOINT should be set to http://<node-ip>:34318
+# e.g. OMO_METRICS_ENDPOINT=http://192.168.97.2:34318
+#
+# NodePort assignments (fixed, within k8s range 30000-32767):
+#   30317 — OTLP gRPC
+#   30318 — OTLP HTTP  ← used by hook-bridge
+#   30889 — Prometheus metrics (for ad-hoc inspection; Prometheus scrapes ClusterIP:8889 internally)
 apiVersion: v1
 kind: Service
 metadata:
   name: otel-collector
   namespace: otel
+  labels:
+    app: otel-collector   # Required: ServiceMonitor selector matches on this label
 spec:
+  type: NodePort
   selector:
     app: otel-collector
   ports:
     - name: otlp-grpc
       port: 4317
       targetPort: 4317
+      nodePort: 30317
     - name: otlp-http
       port: 4318
       targetPort: 4318
+      nodePort: 30318
     - name: prometheus
       port: 8889
       targetPort: 8889
+      nodePort: 30889

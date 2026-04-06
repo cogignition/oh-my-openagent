@@ -553,6 +553,10 @@ export class StreamTranslator {
     return events
   }
 
+  getUsage(): { inputTokens: number; outputTokens: number } {
+    return { inputTokens: this.inputTokens, outputTokens: this.outputTokens }
+  }
+
   finish(): AnthropicSSEEvent[] {
     const events: AnthropicSSEEvent[] = []
 

@@ -227,7 +227,7 @@ spec:
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [
             {
-              "expr": "sum by (direction, model) (rate(omo_delegate_tokens_total{category=~\"$category\"}[5m]) * 60)",
+              "expr": "sum by (direction, model) (rate(omo_proxy_tokens_total[5m]) * 60)",
               "legendFormat": "{{direction}} / {{model}}"
             }
           ],
@@ -243,7 +243,7 @@ spec:
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [
             {
-              "expr": "sum by (direction) (omo_delegate_tokens_total)",
+              "expr": "sum by (direction) (omo_proxy_tokens_total)",
               "legendFormat": "{{direction}}"
             }
           ],
@@ -257,11 +257,11 @@ spec:
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [
             {
-              "expr": "sum(omo_delegate_tokens_total{direction=\"input\"}) or vector(0)",
+              "expr": "sum(omo_proxy_tokens_total{direction=\"input\"}) or vector(0)",
               "legendFormat": "Input"
             },
             {
-              "expr": "sum(omo_delegate_tokens_total{direction=\"output\"}) or vector(0)",
+              "expr": "sum(omo_proxy_tokens_total{direction=\"output\"}) or vector(0)",
               "legendFormat": "Output"
             }
           ],
@@ -275,15 +275,22 @@ spec:
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [
             {
-              "expr": "sum by (model) (omo_delegate_tokens_total)",
+              "expr": "sum by (model) (omo_proxy_tokens_total)",
               "legendFormat": "{{model}}"
             }
           ],
           "fieldConfig": {
-            "defaults": { "unit": "short" },
+            "defaults": {
+              "unit": "short",
+              "color": { "mode": "palette-classic" }
+            },
             "overrides": []
           },
-          "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "horizontal" }
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "orientation": "horizontal",
+            "displayMode": "basic"
+          }
         }
       ]
     }

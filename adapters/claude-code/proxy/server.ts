@@ -22,6 +22,74 @@ import { translateRequest, translateResponse, StreamTranslator, formatSSE } from
 import type { AnthropicRequest, OpenAIDelta } from './translate.js'
 
 // ---------------------------------------------------------------------------
+// Metrics — emit token counts directly from the proxy (the Claude Agent SDK
+// returns zero tokens for non-Anthropic models; the proxy sees the real usage).
+// ---------------------------------------------------------------------------
+
+const METRICS_ENABLED = process.env.OMO_METRICS_ENABLED === 'true'
+const METRICS_ENDPOINT = (process.env.OMO_METRICS_ENDPOINT ?? 'http://localhost:4318').replace(/\/$/, '')
+
+async function emitTokenMetrics(opts: {
+  provider: string
+  model: string
+  inputTokens: number
+  outputTokens: number
+}): Promise<void> {
+  if (!METRICS_ENABLED || (!opts.inputTokens && !opts.outputTokens)) return
+  try {
+    const nowNs = String(BigInt(Date.now()) * 1_000_000n)
+    const payload = {
+      resourceMetrics: [{
+        resource: { attributes: [
+          { key: 'service.name', value: { stringValue: 'oh-my-openagent' } },
+          { key: 'adapter',      value: { stringValue: 'claude-code' } },
+          { key: 'component',    value: { stringValue: 'proxy' } },
+        ]},
+        scopeMetrics: [{
+          scope: { name: 'omo-proxy' },
+          metrics: [{
+            name: 'omo_proxy_tokens_total',
+            description: 'Tokens processed by the omo proxy (source of truth for non-Anthropic models)',
+            sum: {
+              dataPoints: [
+                ...(opts.inputTokens ? [{
+                  attributes: [
+                    { key: 'direction', value: { stringValue: 'input' } },
+                    { key: 'provider',  value: { stringValue: opts.provider } },
+                    { key: 'model',     value: { stringValue: opts.model } },
+                  ],
+                  startTimeUnixNano: nowNs,
+                  timeUnixNano: nowNs,
+                  asInt: String(opts.inputTokens),
+                }] : []),
+                ...(opts.outputTokens ? [{
+                  attributes: [
+                    { key: 'direction', value: { stringValue: 'output' } },
+                    { key: 'provider',  value: { stringValue: opts.provider } },
+                    { key: 'model',     value: { stringValue: opts.model } },
+                  ],
+                  startTimeUnixNano: nowNs,
+                  timeUnixNano: nowNs,
+                  asInt: String(opts.outputTokens),
+                }] : []),
+              ],
+              aggregationTemporality: 1,  // DELTA
+              isMonotonic: true,
+            },
+          }],
+        }],
+      }],
+    }
+    await fetch(`${METRICS_ENDPOINT}/v1/metrics`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(3000),
+    })
+  } catch { /* best-effort, never block a response */ }
+}
+
+// ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
 
@@ -250,6 +318,9 @@ async function handleMessages(req: Request): Promise<Response> {
           for (const ev of translator.finish()) {
             controller.enqueue(new TextEncoder().encode(formatSSE(ev)))
           }
+          // Emit token metrics (fire-and-forget; translator has accumulated usage)
+          const usage = translator.getUsage()
+          void emitTokenMetrics({ provider: entry.name, model: upstreamModel, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens })
         } catch (err) {
           controller.error(err)
         } finally {
@@ -268,6 +339,12 @@ async function handleMessages(req: Request): Promise<Response> {
   try {
     const openaiResponse = await upstream.json()
     const anthropicResponse = translateResponse(openaiResponse, upstreamModel)
+    void emitTokenMetrics({
+      provider: entry.name,
+      model: upstreamModel,
+      inputTokens:  anthropicResponse.usage.input_tokens,
+      outputTokens: anthropicResponse.usage.output_tokens,
+    })
     return new Response(JSON.stringify(anthropicResponse), {
       status: 200,
       headers: { 'content-type': 'application/json' },
