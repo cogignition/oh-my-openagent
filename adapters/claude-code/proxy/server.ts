@@ -173,6 +173,17 @@ function loadProxyEntries(): Map<string, ProxyEntry> {
 
 const ENTRIES = loadProxyEntries()
 
+/** Strip content-encoding/content-length from upstream headers.
+ *  Bun auto-decompresses responses but leaves the original headers,
+ *  causing downstream clients to attempt double-decompression (ZlibError). */
+function sanitizeResponseHeaders(headers: Headers): Headers {
+  const clean = new Headers(headers)
+  clean.delete('content-encoding')
+  clean.delete('content-length')  // length no longer matches after decompression
+  clean.delete('transfer-encoding')
+  return clean
+}
+
 process.stderr.write(
   `[omo-proxy] listening on :${PORT} — providers: ${[...ENTRIES.keys()].join(', ') || '(none)'}\n`
 )
@@ -249,15 +260,34 @@ async function handleMessages(req: Request): Promise<Response> {
   // Emits omo_session_tokens_total (distinct from omo_proxy_tokens_total for translated calls).
   if (entry.proto === 'anthropic') {
     const forwardBody = { ...body, model: upstreamModel }
+    // Forward Claude Code's original headers (anthropic-version, anthropic-beta for prompt
+    // caching, etc.) so features work transparently through the proxy.
+    const forwardHeaders: Record<string, string> = {
+      'content-type': 'application/json',
+      // Disable compression so upstream sends plain text/JSON — avoids
+      // double-decompression (Bun auto-decompresses, then Claude Code
+      // tries again based on the forwarded content-encoding header).
+      'accept-encoding': 'identity',
+    }
+    for (const [k, v] of req.headers.entries()) {
+      // Forward auth headers (x-api-key, authorization), Anthropic feature headers,
+      // and any other headers Claude Code sends for prompt caching, beta features, etc.
+      // Skip accept-encoding — we force identity above to prevent zlib errors.
+      if (k === 'accept-encoding') continue
+      if (k.startsWith('anthropic-') || k === 'x-api-key' || k === 'authorization') {
+        forwardHeaders[k] = v
+      }
+    }
+    // Only override auth if the entry has a configured API key — otherwise
+    // pass through whatever Claude Code sent (OAuth Bearer token, etc.)
+    if (entry.apiKey) {
+      forwardHeaders['x-api-key'] = entry.apiKey
+    }
     let upstream: Response
     try {
       upstream = await fetch(entry.targetUrl, {
         method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'authorization': `Bearer ${entry.apiKey}`,
-          'x-api-key': entry.apiKey,
-        },
+        headers: forwardHeaders,
         body: JSON.stringify(forwardBody),
       })
     } catch (err) {
@@ -265,7 +295,7 @@ async function handleMessages(req: Request): Promise<Response> {
     }
 
     if (!upstream.ok || !upstream.body) {
-      return new Response(upstream.body, { status: upstream.status, headers: upstream.headers })
+      return new Response(upstream.body, { status: upstream.status, headers: sanitizeResponseHeaders(upstream.headers) })
     }
 
     if (body.stream) {
@@ -307,7 +337,7 @@ async function handleMessages(req: Request): Promise<Response> {
           }
         },
       })
-      return new Response(readable, { status: upstream.status, headers: upstream.headers })
+      return new Response(readable, { status: upstream.status, headers: sanitizeResponseHeaders(upstream.headers) })
     }
 
     // Non-streaming passthrough — read, extract usage, re-encode
@@ -318,9 +348,9 @@ async function handleMessages(req: Request): Promise<Response> {
         inputTokens:  json.usage?.input_tokens  ?? 0,
         outputTokens: json.usage?.output_tokens ?? 0,
       })
-      return new Response(JSON.stringify(json), { status: upstream.status, headers: upstream.headers })
+      return new Response(JSON.stringify(json), { status: upstream.status, headers: sanitizeResponseHeaders(upstream.headers) })
     } catch {
-      return new Response(upstream.body, { status: upstream.status, headers: upstream.headers })
+      return new Response(upstream.body, { status: upstream.status, headers: sanitizeResponseHeaders(upstream.headers) })
     }
   }
 

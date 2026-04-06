@@ -54,6 +54,8 @@ export async function renderOmoAgents(opts: RenderOmoAgentsOpts): Promise<void> 
     if (SKIP_AGENTS.has(name)) continue
 
     try {
+      // With ANTHROPIC_BASE_URL pointing to the proxy, all models route correctly:
+      // Claude models → passthrough to Anthropic, others → translated to provider API.
       const model = AGENT_MODEL_OVERRIDES[name]
         ?? (QUICK_AGENTS.has(name) ? stripProviderPrefix(quickModel) : stripProviderPrefix(deepModel))
 

@@ -79,8 +79,24 @@ export async function ensureProxyRunning(): Promise<void> {
     },
   })
 
-  // Brief wait to confirm startup
-  await new Promise(resolve => setTimeout(resolve, 200))
-
-  process.stderr.write(`[omo-proxy] daemon started (pid ${child.pid}) on port ${port}\n`)
+  // Wait for proxy to accept connections before returning — Claude Code
+  // may make API calls immediately after SessionStart completes.
+  process.stderr.write(`[omo-proxy] daemon starting (pid ${child.pid}) on port ${port}...\n`)
+  for (let i = 0; i < 20; i++) {
+    await new Promise(r => setTimeout(r, 100))
+    try {
+      const res = await fetch(`http://localhost:${port}/v1/messages`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+        signal: AbortSignal.timeout(200),
+      })
+      // Any response (even 400) means the server is up
+      if (res.status > 0) {
+        process.stderr.write(`[omo-proxy] daemon ready (${(i + 1) * 100}ms)\n`)
+        return
+      }
+    } catch { /* not ready yet */ }
+  }
+  process.stderr.write(`[omo-proxy] daemon may not be ready after 2s — proceeding anyway\n`)
 }
