@@ -50,8 +50,14 @@ function getServerScriptPath(): string {
  * Ensure the omo-proxy daemon is running.
  * No-op if OMO_PROXY_ENABLED is not "true".
  */
+function hasProxyConfig(): boolean {
+  // Start if any provider entry is configured, or explicit enable flag is set
+  if (process.env.OMO_PROXY_ENABLED === 'true') return true
+  return Object.keys(process.env).some(k => /^OMO_PROXY_[A-Z0-9]+_TARGET_URL$/.test(k))
+}
+
 export async function ensureProxyRunning(): Promise<void> {
-  if (process.env.OMO_PROXY_ENABLED !== 'true') return
+  if (!hasProxyConfig()) return
 
   const port = getPort()
   const existingPid = readPidFile(port)
