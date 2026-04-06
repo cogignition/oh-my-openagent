@@ -1,7 +1,7 @@
 import { readStdin } from './stdin-reader.js'
 import { mapEvent, type ClaudeCodeInput } from './event-mapper.js'
 import { getPlugin } from './entry.js'
-import { recordHookEvent, shutdown } from './metrics.js'
+import { recordHookEvent, flush, shutdown } from './metrics.js'
 import { classifyPrompt } from './prompt-router.js'
 import { runHeadlessDelegate } from './headless-delegate.js'
 
@@ -29,9 +29,13 @@ export async function run(): Promise<void> {
       recordHookEvent(parsed.hook_event_name, true)
       try {
         const result = await runHeadlessDelegate({ task: decision.prompt, category: decision.route, directory })
+        // Flush metrics before writing response — Claude Code may kill the process
+        // immediately after reading stdout, so the finally() flush may never run.
+        await flush()
         process.stdout.write(JSON.stringify({ continue: false, stopReason: result }) + '\n')
       } catch (err) {
         process.stderr.write(`[hook-bridge] delegate error: ${err}\n`)
+        await flush()
         process.stdout.write(JSON.stringify({ continue: true }) + '\n')
       }
       return

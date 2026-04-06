@@ -142,7 +142,15 @@ export function recordFallback(category: string, reason: string): void {
   try { fallbackCounter()?.add(1, { category, reason }) } catch {}
 }
 
+/** Force-flush pending metrics without shutting down the provider. */
+export async function flush(): Promise<void> {
+  try { await _provider?.forceFlush() } catch {}
+}
+
 /** Flush pending metrics on shutdown. Best-effort. */
 export async function shutdown(): Promise<void> {
-  try { await _provider?.shutdown() } catch {}
+  try {
+    await _provider?.forceFlush()
+    await _provider?.shutdown()
+  } catch {}
 }
