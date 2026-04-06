@@ -147,9 +147,6 @@ export interface OpenAIDelta {
 // Request translation
 // ---------------------------------------------------------------------------
 
-function isOSeries(model: string): boolean {
-  return /^o\d/.test(model)
-}
 
 function translateContentBlock(block: AnthropicContentBlock, role: string): OpenAIMessage[] {
   if (role === 'user' && block.type === 'tool_result') {
@@ -246,13 +243,9 @@ export function translateRequest(body: AnthropicRequest, modelOverride?: string)
     messages: openaiMessages,
   }
 
-  // max_tokens field: o-series uses max_completion_tokens
+  // Use max_completion_tokens universally — max_tokens is deprecated in o-series and gpt-5+
   if (body.max_tokens !== undefined) {
-    if (isOSeries(model)) {
-      req.max_completion_tokens = body.max_tokens
-    } else {
-      req.max_tokens = body.max_tokens
-    }
+    req.max_completion_tokens = body.max_tokens
   }
 
   if (body.temperature !== undefined) req.temperature = body.temperature
