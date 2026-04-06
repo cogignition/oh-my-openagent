@@ -44,7 +44,7 @@ spec:
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [
             {
-              "expr": "sum by (event_name) (rate(omo_hook_events_total[1m]) * 60)",
+              "expr": "sum by (event_name) (rate(omo_hook_events_total[5m]) * 60)",
               "legendFormat": "{{event_name}}"
             }
           ],
@@ -90,7 +90,7 @@ spec:
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [
             {
-              "expr": "sum by (category, model, status) (rate(omo_delegate_calls_total{category=~\"$category\"}[1m]) * 60)",
+              "expr": "sum by (category, model, status) (rate(omo_delegate_calls_total{category=~\"$category\"}[5m]) * 60)",
               "legendFormat": "{{category}} / {{model}} [{{status}}]"
             }
           ],
@@ -134,7 +134,7 @@ spec:
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [
             {
-              "expr": "sum by (category, reason) (rate(omo_lm_studio_fallbacks_total[1m]) * 60)",
+              "expr": "sum by (category, reason) (rate(omo_lm_studio_fallbacks_total[5m]) * 60)",
               "legendFormat": "{{category}} ({{reason}})"
             }
           ],
@@ -154,7 +154,7 @@ spec:
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [
             {
-              "expr": "sum by (category) (rate(omo_delegate_calls_total{status=\"error\"}[1m]) * 60)",
+              "expr": "sum by (category) (rate(omo_delegate_calls_total{status=\"error\"}[5m]) * 60)",
               "legendFormat": "errors {{category}}"
             }
           ],
@@ -227,7 +227,7 @@ spec:
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [
             {
-              "expr": "sum by (direction, model) (rate(omo_delegate_tokens_total{category=~\"$category\"}[1m]) * 60)",
+              "expr": "sum by (direction, model) (rate(omo_delegate_tokens_total{category=~\"$category\"}[5m]) * 60)",
               "legendFormat": "{{direction}} / {{model}}"
             }
           ],

@@ -83,4 +83,8 @@ run()
     process.stderr.write(`[hook-bridge] fatal: ${err}\n`)
     process.stdout.write(JSON.stringify({ continue: true }) + '\n')
   })
-  .finally(() => shutdown())
+  .finally(async () => {
+    // Flush metrics before exit — the OTel periodic exporter won't fire
+    // in a short-lived process without an explicit shutdown flush.
+    await shutdown()
+  })
