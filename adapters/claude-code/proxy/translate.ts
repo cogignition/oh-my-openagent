@@ -73,6 +73,7 @@ export interface OpenAIRequest {
   temperature?: number
   top_p?: number
   stream?: boolean
+  stream_options?: { include_usage: boolean }
   tools?: OpenAITool[]
   stop?: string[]
 }
@@ -250,7 +251,12 @@ export function translateRequest(body: AnthropicRequest, modelOverride?: string)
 
   if (body.temperature !== undefined) req.temperature = body.temperature
   if (body.top_p !== undefined) req.top_p = body.top_p
-  if (body.stream !== undefined) req.stream = body.stream
+  if (body.stream !== undefined) {
+    req.stream = body.stream
+    // Request usage in the final chunk — OpenAI only sends it when this flag is set.
+    // Without it, chunk.usage is always undefined and token counts stay at 0.
+    if (body.stream) req.stream_options = { include_usage: true }
+  }
 
   if (body.stop_sequences && body.stop_sequences.length > 0) {
     req.stop = body.stop_sequences
@@ -358,17 +364,19 @@ export class StreamTranslator {
 
   feed(chunk: OpenAIDelta): AnthropicSSEEvent[] {
     const events: AnthropicSSEEvent[] = []
+
+    // Capture usage before the early-return — stream_options sends usage in a final
+    // chunk with choices:[] that would otherwise be skipped entirely.
+    if (chunk.usage) {
+      this.inputTokens = chunk.usage.prompt_tokens
+      this.outputTokens = chunk.usage.completion_tokens
+    }
+
     const choices = chunk.choices
     if (!choices || choices.length === 0) return events
 
     const choice = choices[0]
     const { delta, finish_reason } = choice
-
-    // Track usage if present
-    if (chunk.usage) {
-      this.inputTokens = chunk.usage.prompt_tokens
-      this.outputTokens = chunk.usage.completion_tokens
-    }
 
     // First chunk: emit message_start + content_block_start (text)
     if (!this.started && delta.role === 'assistant') {

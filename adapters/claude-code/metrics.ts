@@ -104,6 +104,8 @@ function delegateLatency(): Histogram | null {
   _delegateLatency = m.createHistogram('omo_delegate_latency_ms', {
     description: 'Headless delegate call latency in milliseconds',
     unit: 'ms',
+    // Buckets cover quick (5-15s via LM Studio/OpenAI) and deep (10-120s) calls
+    advice: { explicitBucketBoundaries: [1000, 2500, 5000, 10000, 15000, 20000, 30000, 45000, 60000, 90000, 120000] },
   })
   return _delegateLatency
 }
@@ -163,16 +165,16 @@ export function recordDelegateCall(opts: {
 
 export function recordSessionTokens(opts: {
   model: string
-  source: 'session' | 'delegate'
+  origin: 'session' | 'delegate'
   inputTokens: number
   outputTokens: number
   cacheReadTokens?: number
 }): void {
-  const { model, source, inputTokens, outputTokens, cacheReadTokens } = opts
+  const { model, origin, inputTokens, outputTokens, cacheReadTokens } = opts
   try {
-    if (inputTokens)      sessionTokens()?.add(inputTokens,      { direction: 'input',      model, source })
-    if (outputTokens)     sessionTokens()?.add(outputTokens,     { direction: 'output',     model, source })
-    if (cacheReadTokens)  sessionTokens()?.add(cacheReadTokens,  { direction: 'cache_read', model, source })
+    if (inputTokens)      sessionTokens()?.add(inputTokens,      { direction: 'input',      model, origin })
+    if (outputTokens)     sessionTokens()?.add(outputTokens,     { direction: 'output',     model, origin })
+    if (cacheReadTokens)  sessionTokens()?.add(cacheReadTokens,  { direction: 'cache_read', model, origin })
   } catch {}
 }
 

@@ -90,10 +90,13 @@ function saveSessionState(sessionId: string, state: SessionState): void {
   } catch { /* best-effort */ }
 }
 
-/** Emit delta tokens for a single JSONL file (main session or delegate sub-session). */
+/** Emit delta tokens for the main session JSONL only.
+ *  Delegate sub-sessions (Agent SDK) use non-Claude models routed through the proxy —
+ *  their tokens are already tracked via omo_proxy_tokens_total, so skip them here. */
 function processJSONL(filePath: string, fileSessionId: string, mainSessionId: string): void {
   const current = readJSONLUsage(filePath)
   if (!current) return
+  if (!current.model.startsWith('claude-')) return
 
   const prev = loadSessionState(fileSessionId)
   const deltaInput     = Math.max(0, current.inputTokens     - prev.inputTokens)
@@ -101,10 +104,10 @@ function processJSONL(filePath: string, fileSessionId: string, mainSessionId: st
   const deltaCacheRead = Math.max(0, current.cacheReadTokens - prev.cacheReadTokens)
 
   if (deltaInput || deltaOutput || deltaCacheRead) {
-    const source = fileSessionId === mainSessionId ? 'session' : 'delegate'
+    const origin = fileSessionId === mainSessionId ? 'session' : 'delegate'
     recordSessionTokens({
       model:           current.model,
-      source,
+      origin,
       inputTokens:     deltaInput,
       outputTokens:    deltaOutput,
       cacheReadTokens: deltaCacheRead,
@@ -119,13 +122,14 @@ function processJSONL(filePath: string, fileSessionId: string, mainSessionId: st
 }
 
 async function captureSessionTokens(sessionId: string, dir: string): Promise<void> {
-  // Scan all JSONL files in the project directory — includes the main session
-  // (source=session) and any delegate sub-sessions spawned by @quick/@deep calls
-  // (source=delegate). Each file gets independent delta tracking so we only emit
-  // the increment since the last Stop.
+  // Only scan the main session JSONL. Delegate sub-sessions (Agent SDK) fire their
+  // own Stop hooks with their own session ID as "main" — scanning all files would
+  // incorrectly label sub-session tokens as origin="session". Delegate token counts
+  // are tracked correctly via omo_proxy_tokens_total emitted by the proxy.
   const files = listProjectJSONLs(dir)
-  for (const { path, sessionId: fileSessionId } of files) {
-    processJSONL(path, fileSessionId, sessionId)
+  const mainFile = files.find(f => f.sessionId === sessionId)
+  if (mainFile) {
+    processJSONL(mainFile.path, mainFile.sessionId, sessionId)
   }
 }
 

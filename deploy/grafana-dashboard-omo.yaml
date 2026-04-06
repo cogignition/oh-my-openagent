@@ -84,18 +84,21 @@ spec:
         },
         {
           "id": 6,
-          "title": "Delegate Calls / min",
+          "title": "Delegate Calls",
           "type": "timeseries",
           "gridPos": { "x": 0, "y": 10, "w": 12, "h": 8 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [
             {
-              "expr": "sum by (category, model, status) (rate(omo_delegate_calls_total{category=~\"$category\"}[5m]) * 60)",
+              "expr": "sum by (category, model, status) (increase(omo_delegate_calls_total{category=~\"$category\"}[5m]))",
               "legendFormat": "{{category}} / {{model}} [{{status}}]"
             }
           ],
           "fieldConfig": {
-            "defaults": { "unit": "reqpm", "custom": { "fillOpacity": 10 } }
+            "defaults": {
+              "unit": "short",
+              "custom": { "drawStyle": "bars", "fillOpacity": 80, "lineWidth": 0 }
+            }
           }
         },
         {
@@ -118,7 +121,12 @@ spec:
               "legendFormat": "p99 {{category}}"
             }
           ],
-          "fieldConfig": { "defaults": { "unit": "ms" } }
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ms",
+              "custom": { "drawStyle": "bars", "fillOpacity": 80, "lineWidth": 0 }
+            }
+          }
         },
         {
           "id": 8,
@@ -228,11 +236,11 @@ spec:
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [
             {
-              "expr": "sum by (model) (rate(omo_session_tokens_total{source=\"session\",direction=\"output\"}[5m]) * 60)",
+              "expr": "sum by (model) (rate(omo_session_tokens_total{origin=\"session\",direction=\"output\",model=~\"claude-.*\"}[5m]) * 60)",
               "legendFormat": "main / {{model}}"
             },
             {
-              "expr": "sum by (model) (rate(omo_session_tokens_total{source=\"delegate\",direction=\"output\"}[5m]) * 60)",
+              "expr": "sum by (model) (rate(omo_proxy_tokens_total{direction=\"output\"}[5m]) * 60)",
               "legendFormat": "delegate / {{model}}"
             }
           ],
@@ -249,11 +257,11 @@ spec:
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [
             {
-              "expr": "sum(omo_session_tokens_total{source=\"session\",direction=\"input\"}) or vector(0)",
+              "expr": "sum(omo_session_tokens_total{origin=\"session\",direction=\"input\",model=~\"claude-.*\"}) or vector(0)",
               "legendFormat": "Input"
             },
             {
-              "expr": "sum(omo_session_tokens_total{source=\"session\",direction=\"output\"}) or vector(0)",
+              "expr": "sum(omo_session_tokens_total{origin=\"session\",direction=\"output\",model=~\"claude-.*\"}) or vector(0)",
               "legendFormat": "Output"
             }
           ],
@@ -268,7 +276,7 @@ spec:
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [
             {
-              "expr": "sum by (model) (omo_session_tokens_total{source=\"delegate\",direction=\"output\"})",
+              "expr": "sum by (model) (omo_proxy_tokens_total{direction=\"output\"})",
               "legendFormat": "{{model}}"
             }
           ],
@@ -291,7 +299,7 @@ spec:
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [
             {
-              "expr": "sum(omo_session_tokens_total{source=\"session\",direction=\"cache_read\"}) or vector(0)",
+              "expr": "sum(omo_session_tokens_total{origin=\"session\",direction=\"cache_read\"}) or vector(0)",
               "legendFormat": "Cache Read"
             }
           ],
