@@ -11,5 +11,5 @@
     "resolveJsonModule": true
   },
   "include": ["adapters/claude-code/**/*"],
-  "exclude": ["node_modules", "dist", "bridge", "adapters/claude-code/build.ts"]
+  "exclude": ["node_modules", "dist", "bridge", "adapters/claude-code/build.ts", "adapters/claude-code/proxy"]
 }

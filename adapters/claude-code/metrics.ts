@@ -8,6 +8,7 @@
  *   omo_hook_events_total          — counter  {event_name}
  *   omo_delegate_calls_total       — counter  {category, model, status}
  *   omo_delegate_latency_ms        — histogram {category, model}
+ *   omo_delegate_tokens_total      — counter  {direction:"input"|"output", category, model}
  *   omo_lm_studio_fallbacks_total  — counter  {category, reason}
  */
 
@@ -60,6 +61,7 @@ function getMeter(): Meter | null {
 let _hookCounter: Counter | null = null
 let _delegateCounter: Counter | null = null
 let _delegateLatency: Histogram | null = null
+let _delegateTokens: Counter | null = null
 let _fallbackCounter: Counter | null = null
 
 function hookCounter(): Counter | null {
@@ -93,6 +95,16 @@ function delegateLatency(): Histogram | null {
   return _delegateLatency
 }
 
+function delegateTokens(): Counter | null {
+  if (_delegateTokens) return _delegateTokens
+  const m = getMeter()
+  if (!m) return null
+  _delegateTokens = m.createCounter('omo_delegate_tokens_total', {
+    description: 'Total tokens consumed by headless delegate calls',
+  })
+  return _delegateTokens
+}
+
 function fallbackCounter(): Counter | null {
   if (_fallbackCounter) return _fallbackCounter
   const m = getMeter()
@@ -114,11 +126,15 @@ export function recordDelegateCall(opts: {
   model: string
   status: 'success' | 'fallback' | 'error'
   latencyMs: number
+  inputTokens?: number
+  outputTokens?: number
 }): void {
-  const { category, model, status, latencyMs } = opts
+  const { category, model, status, latencyMs, inputTokens, outputTokens } = opts
   try {
     delegateCounter()?.add(1, { category, model, status })
     delegateLatency()?.record(latencyMs, { category, model })
+    if (inputTokens)  delegateTokens()?.add(inputTokens,  { direction: 'input',  category, model })
+    if (outputTokens) delegateTokens()?.add(outputTokens, { direction: 'output', category, model })
   } catch {}
 }
 

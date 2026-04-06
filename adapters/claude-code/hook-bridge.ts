@@ -12,6 +12,15 @@ export async function run(): Promise<void> {
 
   const directory = parsed.directory ?? process.cwd()
 
+  // On session start, ensure the Anthropic→OpenAI proxy daemon is running.
+  // Dynamic import keeps proxy/daemon.ts (Bun-native) out of the tsc graph.
+  if (parsed.hook_event_name === 'SessionStart') {
+    const { ensureProxyRunning } = await import('./proxy/daemon.js')
+    await ensureProxyRunning().catch((err: unknown) => {
+      process.stderr.write(`[hook-bridge] proxy daemon start failed: ${err}\n`)
+    })
+  }
+
   // Prompt routing: intercept UserPromptSubmit with known prefixes (@quick, @local, @deep, etc.)
   if (parsed.hook_event_name === 'UserPromptSubmit') {
     const prompt = typeof parsed.prompt === 'string' ? parsed.prompt : ''
