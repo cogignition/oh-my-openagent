@@ -22,71 +22,84 @@ import { translateRequest, translateResponse, StreamTranslator, formatSSE } from
 import type { AnthropicRequest, OpenAIDelta } from './translate.js'
 
 // ---------------------------------------------------------------------------
-// Metrics — emit token counts directly from the proxy (the Claude Agent SDK
-// returns zero tokens for non-Anthropic models; the proxy sees the real usage).
+// Metrics
+//
+// Three discrete token metrics — each tracks a different call path:
+//   omo_session_tokens_total  — main Claude Code session ↔ Anthropic API (passthrough)
+//   omo_proxy_tokens_total    — delegate quick calls → OpenAI / LM Studio (translated)
+//   omo_delegate_tokens_total — delegate deep calls, emitted by the SDK (native Anthropic)
 // ---------------------------------------------------------------------------
 
 const METRICS_ENABLED = process.env.OMO_METRICS_ENABLED === 'true'
 const METRICS_ENDPOINT = (process.env.OMO_METRICS_ENDPOINT ?? 'http://localhost:4318').replace(/\/$/, '')
 
-async function emitTokenMetrics(opts: {
-  provider: string
+function buildTokenPayload(metricName: string, description: string, opts: {
   model: string
+  provider?: string
   inputTokens: number
   outputTokens: number
-}): Promise<void> {
-  if (!METRICS_ENABLED || (!opts.inputTokens && !opts.outputTokens)) return
-  try {
-    const nowNs = String(BigInt(Date.now()) * 1_000_000n)
-    const payload = {
-      resourceMetrics: [{
-        resource: { attributes: [
-          { key: 'service.name', value: { stringValue: 'oh-my-openagent' } },
-          { key: 'adapter',      value: { stringValue: 'claude-code' } },
-          { key: 'component',    value: { stringValue: 'proxy' } },
-        ]},
-        scopeMetrics: [{
-          scope: { name: 'omo-proxy' },
-          metrics: [{
-            name: 'omo_proxy_tokens_total',
-            description: 'Tokens processed by the omo proxy (source of truth for non-Anthropic models)',
-            sum: {
-              dataPoints: [
-                ...(opts.inputTokens ? [{
-                  attributes: [
-                    { key: 'direction', value: { stringValue: 'input' } },
-                    { key: 'provider',  value: { stringValue: opts.provider } },
-                    { key: 'model',     value: { stringValue: opts.model } },
-                  ],
-                  startTimeUnixNano: nowNs,
-                  timeUnixNano: nowNs,
-                  asInt: String(opts.inputTokens),
-                }] : []),
-                ...(opts.outputTokens ? [{
-                  attributes: [
-                    { key: 'direction', value: { stringValue: 'output' } },
-                    { key: 'provider',  value: { stringValue: opts.provider } },
-                    { key: 'model',     value: { stringValue: opts.model } },
-                  ],
-                  startTimeUnixNano: nowNs,
-                  timeUnixNano: nowNs,
-                  asInt: String(opts.outputTokens),
-                }] : []),
-              ],
-              aggregationTemporality: 1,  // DELTA
-              isMonotonic: true,
-            },
-          }],
+}): unknown {
+  const nowNs = String(BigInt(Date.now()) * 1_000_000n)
+  const baseAttrs = (direction: string) => [
+    { key: 'direction', value: { stringValue: direction } },
+    { key: 'model',     value: { stringValue: opts.model } },
+    ...(opts.provider ? [{ key: 'provider', value: { stringValue: opts.provider } }] : []),
+  ]
+  return {
+    resourceMetrics: [{
+      resource: { attributes: [
+        { key: 'service.name', value: { stringValue: 'oh-my-openagent' } },
+        { key: 'adapter',      value: { stringValue: 'claude-code' } },
+        { key: 'component',    value: { stringValue: 'proxy' } },
+      ]},
+      scopeMetrics: [{
+        scope: { name: 'omo-proxy' },
+        metrics: [{
+          name: metricName,
+          description,
+          sum: {
+            dataPoints: [
+              ...(opts.inputTokens ? [{ attributes: baseAttrs('input'),  startTimeUnixNano: nowNs, timeUnixNano: nowNs, asInt: String(opts.inputTokens) }] : []),
+              ...(opts.outputTokens ? [{ attributes: baseAttrs('output'), startTimeUnixNano: nowNs, timeUnixNano: nowNs, asInt: String(opts.outputTokens) }] : []),
+            ],
+            aggregationTemporality: 1,  // DELTA
+            isMonotonic: true,
+          },
         }],
       }],
-    }
+    }],
+  }
+}
+
+async function sendMetrics(payload: unknown): Promise<void> {
+  try {
     await fetch(`${METRICS_ENDPOINT}/v1/metrics`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(3000),
     })
-  } catch { /* best-effort, never block a response */ }
+  } catch { /* best-effort */ }
+}
+
+/** Emitted for translated (OpenAI/LM Studio) proxy calls — delegate quick path. */
+async function emitProxyTokens(opts: { provider: string; model: string; inputTokens: number; outputTokens: number }): Promise<void> {
+  if (!METRICS_ENABLED || (!opts.inputTokens && !opts.outputTokens)) return
+  await sendMetrics(buildTokenPayload(
+    'omo_proxy_tokens_total',
+    'Tokens for delegate quick calls routed through the omo proxy to OpenAI/LM Studio',
+    opts,
+  ))
+}
+
+/** Emitted for Anthropic passthrough calls — main Claude Code session. */
+async function emitSessionTokens(opts: { model: string; inputTokens: number; outputTokens: number }): Promise<void> {
+  if (!METRICS_ENABLED || (!opts.inputTokens && !opts.outputTokens)) return
+  await sendMetrics(buildTokenPayload(
+    'omo_session_tokens_total',
+    'Tokens for the main Claude Code session routed through the omo proxy to Anthropic',
+    opts,
+  ))
 }
 
 // ---------------------------------------------------------------------------
@@ -230,7 +243,8 @@ async function handleMessages(req: Request): Promise<Response> {
 
   const upstreamModel = stripProviderPrefix(body.model, entry.name)
 
-  // Passthrough: upstream speaks Anthropic natively — forward unchanged
+  // Passthrough: upstream speaks Anthropic natively — tap token usage, forward everything else as-is.
+  // Emits omo_session_tokens_total (distinct from omo_proxy_tokens_total for translated calls).
   if (entry.proto === 'anthropic') {
     const forwardBody = { ...body, model: upstreamModel }
     let upstream: Response
@@ -248,11 +262,64 @@ async function handleMessages(req: Request): Promise<Response> {
       return anthropicError(`Upstream fetch failed: ${err}`)
     }
 
-    // Stream or forward response body as-is
-    return new Response(upstream.body, {
-      status: upstream.status,
-      headers: upstream.headers,
-    })
+    if (!upstream.ok || !upstream.body) {
+      return new Response(upstream.body, { status: upstream.status, headers: upstream.headers })
+    }
+
+    if (body.stream) {
+      // Tap SSE stream for message_start (input tokens) and message_delta (output tokens),
+      // forward every byte unchanged so Claude Code sees a normal Anthropic stream.
+      let inputTokens = 0
+      let outputTokens = 0
+      const upstreamBody = upstream.body
+      const readable = new ReadableStream({
+        async start(controller) {
+          const reader = upstreamBody.getReader()
+          const decoder = new TextDecoder()
+          const encoder = new TextEncoder()
+          let buffer = ''
+          try {
+            while (true) {
+              const { done, value } = await reader.read()
+              if (done) break
+              const chunk = decoder.decode(value, { stream: true })
+              controller.enqueue(encoder.encode(chunk))  // forward immediately
+              buffer += chunk
+              // Parse buffered lines to extract usage — we only need to read, not transform
+              const lines = buffer.split('\n')
+              buffer = lines.pop() ?? ''
+              for (const line of lines) {
+                if (!line.startsWith('data: ') || line === 'data: [DONE]') continue
+                try {
+                  const ev = JSON.parse(line.slice(6))
+                  if (ev.type === 'message_start') inputTokens = ev.message?.usage?.input_tokens ?? 0
+                  if (ev.type === 'message_delta') outputTokens = ev.usage?.output_tokens ?? 0
+                } catch { /* skip malformed */ }
+              }
+            }
+          } catch (err) {
+            controller.error(err)
+          } finally {
+            controller.close()
+            void emitSessionTokens({ model: upstreamModel, inputTokens, outputTokens })
+          }
+        },
+      })
+      return new Response(readable, { status: upstream.status, headers: upstream.headers })
+    }
+
+    // Non-streaming passthrough — read, extract usage, re-encode
+    try {
+      const json = await upstream.json() as { usage?: { input_tokens?: number; output_tokens?: number } }
+      void emitSessionTokens({
+        model: upstreamModel,
+        inputTokens:  json.usage?.input_tokens  ?? 0,
+        outputTokens: json.usage?.output_tokens ?? 0,
+      })
+      return new Response(JSON.stringify(json), { status: upstream.status, headers: upstream.headers })
+    } catch {
+      return new Response(upstream.body, { status: upstream.status, headers: upstream.headers })
+    }
   }
 
   // Translate: Anthropic → OpenAI
@@ -320,7 +387,7 @@ async function handleMessages(req: Request): Promise<Response> {
           }
           // Emit token metrics (fire-and-forget; translator has accumulated usage)
           const usage = translator.getUsage()
-          void emitTokenMetrics({ provider: entry.name, model: upstreamModel, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens })
+          void emitProxyTokens({ provider: entry.name, model: upstreamModel, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens })
         } catch (err) {
           controller.error(err)
         } finally {
@@ -339,7 +406,7 @@ async function handleMessages(req: Request): Promise<Response> {
   try {
     const openaiResponse = await upstream.json()
     const anthropicResponse = translateResponse(openaiResponse, upstreamModel)
-    void emitTokenMetrics({
+    void emitProxyTokens({
       provider: entry.name,
       model: upstreamModel,
       inputTokens:  anthropicResponse.usage.input_tokens,

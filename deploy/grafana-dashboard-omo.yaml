@@ -216,19 +216,28 @@ spec:
         {
           "id": 13,
           "type": "row",
-          "title": "Token Usage",
+          "title": "Token Usage — three discrete metrics",
           "gridPos": { "x": 0, "y": 31, "w": 24, "h": 1 }
         },
         {
           "id": 14,
-          "title": "Tokens / min",
+          "title": "Tokens / min (all sources)",
+          "description": "session=main Claude Code session · proxy=delegate quick (OpenAI/LM Studio) · delegate=delegate deep (Anthropic SDK)",
           "type": "timeseries",
-          "gridPos": { "x": 0, "y": 32, "w": 12, "h": 8 },
+          "gridPos": { "x": 0, "y": 32, "w": 16, "h": 8 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [
             {
+              "expr": "sum by (direction, model) (rate(omo_session_tokens_total[5m]) * 60)",
+              "legendFormat": "session {{direction}} / {{model}}"
+            },
+            {
               "expr": "sum by (direction, model) (rate(omo_proxy_tokens_total[5m]) * 60)",
-              "legendFormat": "{{direction}} / {{model}}"
+              "legendFormat": "proxy {{direction}} / {{model}}"
+            },
+            {
+              "expr": "sum by (direction, model) (rate(omo_delegate_tokens_total[5m]) * 60)",
+              "legendFormat": "delegate {{direction}} / {{model}}"
             }
           ],
           "fieldConfig": {
@@ -237,23 +246,29 @@ spec:
         },
         {
           "id": 15,
-          "title": "Input vs Output Tokens",
-          "type": "piechart",
-          "gridPos": { "x": 12, "y": 32, "w": 6, "h": 8 },
+          "title": "Session Tokens (main)",
+          "description": "omo_session_tokens_total — main Claude Code session ↔ Anthropic, read from session JSONL on Stop",
+          "type": "stat",
+          "gridPos": { "x": 16, "y": 32, "w": 4, "h": 4 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [
             {
-              "expr": "sum by (direction) (omo_proxy_tokens_total)",
-              "legendFormat": "{{direction}}"
+              "expr": "sum(omo_session_tokens_total{direction=\"input\"}) or vector(0)",
+              "legendFormat": "Input"
+            },
+            {
+              "expr": "sum(omo_session_tokens_total{direction=\"output\"}) or vector(0)",
+              "legendFormat": "Output"
             }
           ],
-          "fieldConfig": { "defaults": { "unit": "short" } }
+          "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "palette-classic" } } }
         },
         {
           "id": 16,
-          "title": "Total Tokens",
+          "title": "Proxy Tokens (delegate quick)",
+          "description": "omo_proxy_tokens_total — @quick delegate calls → OpenAI / LM Studio via the omo proxy",
           "type": "stat",
-          "gridPos": { "x": 18, "y": 32, "w": 6, "h": 4 },
+          "gridPos": { "x": 20, "y": 32, "w": 4, "h": 4 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [
             {
@@ -265,25 +280,49 @@ spec:
               "legendFormat": "Output"
             }
           ],
-          "fieldConfig": { "defaults": { "unit": "short" } }
+          "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "palette-classic" } } }
         },
         {
-          "id": 17,
-          "title": "Tokens by Model",
-          "type": "bargauge",
-          "gridPos": { "x": 18, "y": 36, "w": 6, "h": 4 },
+          "id": 18,
+          "title": "Delegate Tokens (deep)",
+          "description": "omo_delegate_tokens_total — @deep delegate calls, token counts from the Anthropic SDK",
+          "type": "stat",
+          "gridPos": { "x": 16, "y": 36, "w": 4, "h": 4 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [
             {
+              "expr": "sum(omo_delegate_tokens_total{direction=\"input\"}) or vector(0)",
+              "legendFormat": "Input"
+            },
+            {
+              "expr": "sum(omo_delegate_tokens_total{direction=\"output\"}) or vector(0)",
+              "legendFormat": "Output"
+            }
+          ],
+          "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "palette-classic" } } }
+        },
+        {
+          "id": 17,
+          "title": "Tokens by Model (all sources)",
+          "type": "bargauge",
+          "gridPos": { "x": 20, "y": 36, "w": 4, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum by (model) (omo_session_tokens_total)",
+              "legendFormat": "session/{{model}}"
+            },
+            {
               "expr": "sum by (model) (omo_proxy_tokens_total)",
-              "legendFormat": "{{model}}"
+              "legendFormat": "proxy/{{model}}"
+            },
+            {
+              "expr": "sum by (model) (omo_delegate_tokens_total)",
+              "legendFormat": "delegate/{{model}}"
             }
           ],
           "fieldConfig": {
-            "defaults": {
-              "unit": "short",
-              "color": { "mode": "palette-classic" }
-            },
+            "defaults": { "unit": "short", "color": { "mode": "palette-classic" } },
             "overrides": []
           },
           "options": {

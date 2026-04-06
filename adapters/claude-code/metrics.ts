@@ -4,11 +4,18 @@
  * Emits to OMO_METRICS_ENDPOINT (default: http://localhost:4318) when
  * OMO_METRICS_ENABLED=true. No-ops silently when disabled or unreachable.
  *
- * Instruments:
+ * Three discrete token metrics — each tracks a different call path:
+ *   omo_session_tokens_total       — counter  {direction, model}
+ *     Main Claude Code session ↔ Anthropic. Read from session JSONL on Stop.
+ *   omo_proxy_tokens_total         — emitted by proxy/server.ts, not here
+ *     Delegate quick calls → OpenAI/LM Studio via the omo proxy.
+ *   omo_delegate_tokens_total      — counter  {direction, category, model}
+ *     Delegate deep calls — token counts returned by the Anthropic SDK.
+ *
+ * Other instruments:
  *   omo_hook_events_total          — counter  {event_name}
  *   omo_delegate_calls_total       — counter  {category, model, status}
  *   omo_delegate_latency_ms        — histogram {category, model}
- *   omo_delegate_tokens_total      — counter  {direction:"input"|"output", category, model}
  *   omo_lm_studio_fallbacks_total  — counter  {category, reason}
  */
 
@@ -67,6 +74,7 @@ let _hookCounter: Counter | null = null
 let _delegateCounter: Counter | null = null
 let _delegateLatency: Histogram | null = null
 let _delegateTokens: Counter | null = null
+let _sessionTokens: Counter | null = null
 let _fallbackCounter: Counter | null = null
 
 function hookCounter(): Counter | null {
@@ -110,6 +118,16 @@ function delegateTokens(): Counter | null {
   return _delegateTokens
 }
 
+function sessionTokens(): Counter | null {
+  if (_sessionTokens) return _sessionTokens
+  const m = getMeter()
+  if (!m) return null
+  _sessionTokens = m.createCounter('omo_session_tokens_total', {
+    description: 'Tokens for the main Claude Code session (read from session JSONL on Stop)',
+  })
+  return _sessionTokens
+}
+
 function fallbackCounter(): Counter | null {
   if (_fallbackCounter) return _fallbackCounter
   const m = getMeter()
@@ -140,6 +158,20 @@ export function recordDelegateCall(opts: {
     delegateLatency()?.record(latencyMs, { category, model })
     if (inputTokens)  delegateTokens()?.add(inputTokens,  { direction: 'input',  category, model })
     if (outputTokens) delegateTokens()?.add(outputTokens, { direction: 'output', category, model })
+  } catch {}
+}
+
+export function recordSessionTokens(opts: {
+  model: string
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens?: number
+}): void {
+  const { model, inputTokens, outputTokens, cacheReadTokens } = opts
+  try {
+    if (inputTokens)      sessionTokens()?.add(inputTokens,      { direction: 'input',      model })
+    if (outputTokens)     sessionTokens()?.add(outputTokens,     { direction: 'output',     model })
+    if (cacheReadTokens)  sessionTokens()?.add(cacheReadTokens,  { direction: 'cache_read', model })
   } catch {}
 }
 

@@ -1,9 +1,113 @@
 import { readStdin } from './stdin-reader.js'
 import { mapEvent, type ClaudeCodeInput } from './event-mapper.js'
 import { getPlugin } from './entry.js'
-import { recordHookEvent, flush, shutdown } from './metrics.js'
+import { recordHookEvent, recordSessionTokens, flush, shutdown } from './metrics.js'
 import { classifyPrompt } from './prompt-router.js'
 import { runHeadlessDelegate } from './headless-delegate.js'
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs'
+import { join } from 'path'
+import { homedir } from 'os'
+
+// ---------------------------------------------------------------------------
+// Session token tracking — reads Claude Code's session JSONL on each Stop
+// event to capture main-session Anthropic token usage.
+//
+// Uses delta tracking: stores the last-known cumulative total in a temp file
+// and emits only the increment since the previous Stop (one counter add per turn).
+// ---------------------------------------------------------------------------
+
+/** Encode a cwd path to the Claude Code projects directory name format.
+ *  e.g. /Users/foo/my_project → -Users-foo-my-project */
+function encodeProjectPath(dir: string): string {
+  return dir.replace(/[^a-zA-Z0-9]/g, '-')
+}
+
+interface AssistantUsage {
+  model: string
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+}
+
+/** Read the session JSONL and sum all assistant message token usage. */
+function readSessionUsage(sessionId: string, dir: string): AssistantUsage | null {
+  try {
+    const encoded  = encodeProjectPath(dir)
+    const filePath = join(homedir(), '.claude', 'projects', encoded, `${sessionId}.jsonl`)
+    if (!existsSync(filePath)) return null
+
+    const content = readFileSync(filePath, 'utf-8')
+    let inputTokens = 0, outputTokens = 0, cacheReadTokens = 0, model = ''
+
+    for (const line of content.split('\n')) {
+      if (!line.trim()) continue
+      try {
+        const msg = JSON.parse(line)
+        if (msg.type !== 'assistant' || !msg.message?.usage) continue
+        const u = msg.message.usage
+        inputTokens      += (u.input_tokens               ?? 0)
+        outputTokens     += (u.output_tokens              ?? 0)
+        cacheReadTokens  += (u.cache_read_input_tokens    ?? 0)
+        if (msg.message.model) model = msg.message.model
+      } catch { /* skip malformed lines */ }
+    }
+
+    return { model: model || 'unknown', inputTokens, outputTokens, cacheReadTokens }
+  } catch {
+    return null
+  }
+}
+
+const STATE_DIR = join(homedir(), '.claude', 'tmp', 'omo-session-state')
+
+interface SessionState {
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+}
+
+function loadSessionState(sessionId: string): SessionState {
+  try {
+    const data = readFileSync(join(STATE_DIR, `${sessionId}.json`), 'utf-8')
+    return JSON.parse(data)
+  } catch {
+    return { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 }
+  }
+}
+
+function saveSessionState(sessionId: string, state: SessionState): void {
+  try {
+    mkdirSync(STATE_DIR, { recursive: true })
+    writeFileSync(join(STATE_DIR, `${sessionId}.json`), JSON.stringify(state))
+  } catch { /* best-effort */ }
+}
+
+async function captureSessionTokens(sessionId: string, dir: string): Promise<void> {
+  const current = readSessionUsage(sessionId, dir)
+  if (!current) return
+
+  const prev   = loadSessionState(sessionId)
+
+  // Compute deltas — clamp to 0 to handle compaction (cumulative can drop after compact)
+  const deltaInput     = Math.max(0, current.inputTokens     - prev.inputTokens)
+  const deltaOutput    = Math.max(0, current.outputTokens    - prev.outputTokens)
+  const deltaCacheRead = Math.max(0, current.cacheReadTokens - prev.cacheReadTokens)
+
+  if (deltaInput || deltaOutput || deltaCacheRead) {
+    recordSessionTokens({
+      model:           current.model,
+      inputTokens:     deltaInput,
+      outputTokens:    deltaOutput,
+      cacheReadTokens: deltaCacheRead,
+    })
+  }
+
+  saveSessionState(sessionId, {
+    inputTokens:     current.inputTokens,
+    outputTokens:    current.outputTokens,
+    cacheReadTokens: current.cacheReadTokens,
+  })
+}
 
 export async function run(): Promise<void> {
   const raw = await readStdin()
@@ -40,6 +144,11 @@ export async function run(): Promise<void> {
       }
       return
     }
+  }
+
+  // On Stop: capture main-session token usage from the session JSONL before flushing metrics.
+  if (parsed.hook_event_name === 'Stop' && parsed.session_id) {
+    await captureSessionTokens(String(parsed.session_id), directory)
   }
 
   const target = mapEvent(parsed)
