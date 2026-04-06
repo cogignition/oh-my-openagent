@@ -79,7 +79,8 @@ async function sendMetrics(payload: unknown): Promise<void> {
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(3000),
     })
-  } catch { /* best-effort */ }
+  } catch { /* best-effort */
+  }
 }
 
 /** Emitted for translated (OpenAI/LM Studio) proxy calls — delegate quick path. */
