@@ -57,8 +57,10 @@ async function callAgent(opts: DelegateOptions & {
     const chunks: string[] = []
     let inputTokens = 0
     let outputTokens = 0
+    // Prepend cwd to prompt so the model knows it has access to that directory
+    const prompt = `Working directory: ${opts.directory}\n\n${opts.task}`
     for await (const msg of query({
-      prompt: opts.task,
+      prompt,
       options: {
         cwd: opts.directory,
         model: opts.model,
