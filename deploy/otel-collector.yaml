@@ -1,0 +1,106 @@
+---
+# OTel Collector — receives OTLP from omo Claude Code adapter, exposes Prometheus metrics.
+#
+# Requirements:
+#   - Image: otel/opentelemetry-collector-contrib >= 0.123.0
+#     Reason: deltatocumulative processor added in ~0.107+; 0.102.0 does not have it.
+#   - deltatocumulative processor is REQUIRED because the omo hook-bridge is a short-lived
+#     process (one Bun invocation per hook event). It uses delta temporality so each process
+#     exports its increment rather than a cumulative sum from a fresh origin. Without
+#     deltatocumulative, the Prometheus exporter sees the same cumulative value (1) from
+#     every fresh process and rate() stays 0.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: otel
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          http:
+            endpoint: "0.0.0.0:4318"
+          grpc:
+            endpoint: "0.0.0.0:4317"
+
+    processors:
+      batch:
+        timeout: 10s
+        send_batch_size: 1024
+      # Required: convert delta metrics from short-lived hook-bridge processes to
+      # cumulative before Prometheus scraping. Without this, rate() always returns 0.
+      deltatocumulative:
+        max_stale: 5m
+        max_streams: 500
+
+    exporters:
+      prometheus:
+        endpoint: "0.0.0.0:8889"
+        const_labels:
+          source: oh-my-claudecode
+      debug:
+        verbosity: basic
+
+    service:
+      pipelines:
+        metrics:
+          receivers: [otlp]
+          processors: [deltatocumulative, batch]
+          exporters: [prometheus, debug]
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  namespace: otel
+  labels:
+    app: otel-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+    spec:
+      containers:
+        - name: collector
+          # Minimum version: 0.123.0 (deltatocumulative processor required)
+          image: otel/opentelemetry-collector-contrib:0.123.0
+          args: ["--config=/conf/config.yaml"]
+          ports:
+            - containerPort: 4317  # OTLP gRPC
+            - containerPort: 4318  # OTLP HTTP
+            - containerPort: 8889  # Prometheus metrics
+          volumeMounts:
+            - name: config
+              mountPath: /conf
+      volumes:
+        - name: config
+          configMap:
+            name: otel-collector-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: otel
+spec:
+  selector:
+    app: otel-collector
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+    - name: prometheus
+      port: 8889
+      targetPort: 8889
