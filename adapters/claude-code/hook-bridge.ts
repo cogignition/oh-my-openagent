@@ -1,7 +1,7 @@
 import { readStdin } from './stdin-reader.js'
 import { mapEvent, type ClaudeCodeInput } from './event-mapper.js'
 import { getPlugin } from './entry.js'
-import { recordHookEvent, recordSessionTokens, recordAgentTokens, flush, shutdown } from './metrics.js'
+import { recordHookEvent, recordAgentTokens, flush, shutdown } from './metrics.js'
 import { classifyPrompt, autoClassifyPrompt } from './prompt-router.js'
 import { runHeadlessDelegate } from './headless-delegate.js'
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, unlinkSync } from 'fs'
@@ -66,77 +66,15 @@ function listProjectJSONLs(dir: string): Array<{ path: string; sessionId: string
   }
 }
 
-const STATE_DIR = join(homedir(), '.claude', 'tmp', 'omo-session-state')
 const AGENT_STATE_DIR = join(homedir(), '.claude', 'tmp', 'omo-agent-state')
 
 function isOmoAgent(agentType: string): boolean {
   return agentType.startsWith('omo-')
 }
 
-interface SessionState {
-  inputTokens: number
-  outputTokens: number
-  cacheReadTokens: number
-}
-
-function loadSessionState(sessionId: string): SessionState {
-  try {
-    const data = readFileSync(join(STATE_DIR, `${sessionId}.json`), 'utf-8')
-    return JSON.parse(data)
-  } catch {
-    return { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 }
-  }
-}
-
-function saveSessionState(sessionId: string, state: SessionState): void {
-  try {
-    mkdirSync(STATE_DIR, { recursive: true })
-    writeFileSync(join(STATE_DIR, `${sessionId}.json`), JSON.stringify(state))
-  } catch { /* best-effort */ }
-}
-
-/** Emit delta tokens for the main session JSONL only.
- *  Delegate sub-sessions (Agent SDK) use non-Claude models routed through the proxy —
- *  their tokens are already tracked via omo_proxy_tokens_total, so skip them here. */
-function processJSONL(filePath: string, fileSessionId: string, mainSessionId: string): void {
-  const current = readJSONLUsage(filePath)
-  if (!current) return
-  if (!current.model.startsWith('claude-')) return
-
-  const prev = loadSessionState(fileSessionId)
-  const deltaInput     = Math.max(0, current.inputTokens     - prev.inputTokens)
-  const deltaOutput    = Math.max(0, current.outputTokens    - prev.outputTokens)
-  const deltaCacheRead = Math.max(0, current.cacheReadTokens - prev.cacheReadTokens)
-
-  if (deltaInput || deltaOutput || deltaCacheRead) {
-    const origin = fileSessionId === mainSessionId ? 'session' : 'delegate'
-    recordSessionTokens({
-      model:           current.model,
-      origin,
-      inputTokens:     deltaInput,
-      outputTokens:    deltaOutput,
-      cacheReadTokens: deltaCacheRead,
-    })
-  }
-
-  saveSessionState(fileSessionId, {
-    inputTokens:     current.inputTokens,
-    outputTokens:    current.outputTokens,
-    cacheReadTokens: current.cacheReadTokens,
-  })
-}
-
-async function captureSessionTokens(sessionId: string, dir: string): Promise<void> {
-  // Only scan the main session JSONL. Delegate sub-sessions (Agent SDK) fire their
-  // own Stop hooks with their own session ID as "main" — scanning all files would
-  // incorrectly label sub-session tokens as origin="session". Delegate token counts
-  // are tracked correctly via omo_proxy_tokens_total emitted by the proxy.
-  const files = listProjectJSONLs(dir)
-  const mainFile = files.find(f => f.sessionId === sessionId)
-  if (mainFile) {
-    processJSONL(mainFile.path, mainFile.sessionId, sessionId)
-  }
-}
+// Session tokens are now tracked by the proxy passthrough (emitSessionTokens in server.ts)
+// — no JSONL scanning needed. readJSONLUsage + listProjectJSONLs are kept for agent token
+// tracking in processAgentTokens.
 
 // ---------------------------------------------------------------------------
 // Agent token tracking — reads agent JSONL on SubagentStop
@@ -226,10 +164,8 @@ export async function run(): Promise<void> {
     }
   }
 
-  // On Stop: capture main-session token usage from the session JSONL before flushing metrics.
-  if (parsed.hook_event_name === 'Stop' && parsed.session_id) {
-    await captureSessionTokens(String(parsed.session_id), directory)
-  }
+  // Session tokens are now tracked by the proxy passthrough (emitSessionTokens).
+  // No JSONL scanning on Stop — the proxy emits per-request with origin='session'.
 
   const target = mapEvent(parsed)
 

@@ -36,14 +36,22 @@ const METRICS_ENDPOINT = (process.env.OMO_METRICS_ENDPOINT ?? 'http://localhost:
 function buildTokenPayload(metricName: string, description: string, opts: {
   model: string
   provider?: string
+  origin?: string
   inputTokens: number
   outputTokens: number
+  cacheReadTokens?: number
 }): unknown {
   const nowNs = String(BigInt(Date.now()) * 1_000_000n)
   const baseAttrs = (direction: string) => [
     { key: 'direction', value: { stringValue: direction } },
     { key: 'model',     value: { stringValue: opts.model } },
     ...(opts.provider ? [{ key: 'provider', value: { stringValue: opts.provider } }] : []),
+    ...(opts.origin   ? [{ key: 'origin',   value: { stringValue: opts.origin } }]   : []),
+  ]
+  const dataPoints = [
+    ...(opts.inputTokens     ? [{ attributes: baseAttrs('input'),      startTimeUnixNano: nowNs, timeUnixNano: nowNs, asInt: String(opts.inputTokens) }]     : []),
+    ...(opts.outputTokens    ? [{ attributes: baseAttrs('output'),     startTimeUnixNano: nowNs, timeUnixNano: nowNs, asInt: String(opts.outputTokens) }]    : []),
+    ...(opts.cacheReadTokens ? [{ attributes: baseAttrs('cache_read'), startTimeUnixNano: nowNs, timeUnixNano: nowNs, asInt: String(opts.cacheReadTokens) }] : []),
   ]
   return {
     resourceMetrics: [{
@@ -58,10 +66,7 @@ function buildTokenPayload(metricName: string, description: string, opts: {
           name: metricName,
           description,
           sum: {
-            dataPoints: [
-              ...(opts.inputTokens ? [{ attributes: baseAttrs('input'),  startTimeUnixNano: nowNs, timeUnixNano: nowNs, asInt: String(opts.inputTokens) }] : []),
-              ...(opts.outputTokens ? [{ attributes: baseAttrs('output'), startTimeUnixNano: nowNs, timeUnixNano: nowNs, asInt: String(opts.outputTokens) }] : []),
-            ],
+            dataPoints,
             aggregationTemporality: 1,  // DELTA
             isMonotonic: true,
           },
@@ -94,12 +99,12 @@ async function emitProxyTokens(opts: { provider: string; model: string; inputTok
 }
 
 /** Emitted for Anthropic passthrough calls — main Claude Code session. */
-async function emitSessionTokens(opts: { model: string; inputTokens: number; outputTokens: number }): Promise<void> {
-  if (!METRICS_ENABLED || (!opts.inputTokens && !opts.outputTokens)) return
+async function emitSessionTokens(opts: { model: string; inputTokens: number; outputTokens: number; cacheReadTokens?: number }): Promise<void> {
+  if (!METRICS_ENABLED || (!opts.inputTokens && !opts.outputTokens && !opts.cacheReadTokens)) return
   await sendMetrics(buildTokenPayload(
     'omo_session_tokens_total',
     'Tokens for the main Claude Code session routed through the omo proxy to Anthropic',
-    opts,
+    { ...opts, origin: 'session' },
   ))
 }
 
@@ -300,10 +305,10 @@ async function handleMessages(req: Request): Promise<Response> {
     }
 
     if (body.stream) {
-      // Tap SSE stream for message_start (input tokens) and message_delta (output tokens),
-      // forward every byte unchanged so Claude Code sees a normal Anthropic stream.
+      // Tap SSE stream for token usage — forward every byte unchanged.
       let inputTokens = 0
       let outputTokens = 0
+      let cacheReadTokens = 0
       const upstreamBody = upstream.body
       const readable = new ReadableStream({
         async start(controller) {
@@ -325,7 +330,10 @@ async function handleMessages(req: Request): Promise<Response> {
                 if (!line.startsWith('data: ') || line === 'data: [DONE]') continue
                 try {
                   const ev = JSON.parse(line.slice(6))
-                  if (ev.type === 'message_start') inputTokens = ev.message?.usage?.input_tokens ?? 0
+                  if (ev.type === 'message_start') {
+                    inputTokens = ev.message?.usage?.input_tokens ?? 0
+                    cacheReadTokens = ev.message?.usage?.cache_read_input_tokens ?? 0
+                  }
                   if (ev.type === 'message_delta') outputTokens = ev.usage?.output_tokens ?? 0
                 } catch { /* skip malformed */ }
               }
@@ -334,7 +342,7 @@ async function handleMessages(req: Request): Promise<Response> {
             controller.error(err)
           } finally {
             controller.close()
-            void emitSessionTokens({ model: upstreamModel, inputTokens, outputTokens })
+            void emitSessionTokens({ model: upstreamModel, inputTokens, outputTokens, cacheReadTokens })
           }
         },
       })
@@ -343,11 +351,12 @@ async function handleMessages(req: Request): Promise<Response> {
 
     // Non-streaming passthrough — read, extract usage, re-encode
     try {
-      const json = await upstream.json() as { usage?: { input_tokens?: number; output_tokens?: number } }
+      const json = await upstream.json() as { usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number } }
       void emitSessionTokens({
         model: upstreamModel,
-        inputTokens:  json.usage?.input_tokens  ?? 0,
-        outputTokens: json.usage?.output_tokens ?? 0,
+        inputTokens:     json.usage?.input_tokens              ?? 0,
+        outputTokens:    json.usage?.output_tokens             ?? 0,
+        cacheReadTokens: json.usage?.cache_read_input_tokens   ?? 0,
       })
       return new Response(JSON.stringify(json), { status: upstream.status, headers: sanitizeResponseHeaders(upstream.headers) })
     } catch {

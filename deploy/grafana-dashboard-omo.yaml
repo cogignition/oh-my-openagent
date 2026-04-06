@@ -73,6 +73,18 @@ spec:
           "fieldConfig": { "defaults": { "unit": "short" } }
         },
         {
+          "id": 22,
+          "title": "Classifier Decisions",
+          "type": "stat",
+          "gridPos": { "x": 12, "y": 5, "w": 6, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            { "expr": "sum(omo_classifier_decisions_total{decision=\"quick\"}) or vector(0)", "legendFormat": "Quick" },
+            { "expr": "sum(omo_classifier_decisions_total{decision=\"pass\"}) or vector(0)", "legendFormat": "Pass" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "palette-classic" } } }
+        },
+        {
           "id": 4,
           "title": "Events by Type",
           "type": "piechart",

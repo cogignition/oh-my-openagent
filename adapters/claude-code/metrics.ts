@@ -82,6 +82,7 @@ let _sessionTokens: Counter | null = null
 let _fallbackCounter: Counter | null = null
 let _agentTokens: Counter | null = null
 let _classifierCounter: Counter | null = null
+let _classifierLatency: Histogram | null = null
 
 function hookCounter(): Counter | null {
   if (_hookCounter) return _hookCounter
@@ -166,6 +167,18 @@ function classifierCounter(): Counter | null {
   return _classifierCounter
 }
 
+function classifierLatency(): Histogram | null {
+  if (_classifierLatency) return _classifierLatency
+  const m = getMeter()
+  if (!m) return null
+  _classifierLatency = m.createHistogram('omo_classifier_latency_ms', {
+    description: 'Auto-classifier call latency in milliseconds',
+    unit: 'ms',
+    advice: { explicitBucketBoundaries: [50, 100, 200, 300, 500, 750, 1000] },
+  })
+  return _classifierLatency
+}
+
 // Public API — all no-op when metrics disabled
 
 export function recordHookEvent(eventName: string, routed = false): void {
@@ -228,7 +241,10 @@ export function recordClassifierDecision(opts: {
   latencyMs: number
   model: string
 }): void {
-  try { classifierCounter()?.add(1, { decision: opts.decision, model: opts.model }) } catch {}
+  try {
+    classifierCounter()?.add(1, { decision: opts.decision, model: opts.model })
+    classifierLatency()?.record(opts.latencyMs, { model: opts.model })
+  } catch {}
 }
 
 /** Force-flush pending metrics without shutting down the provider. */
