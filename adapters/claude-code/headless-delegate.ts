@@ -63,6 +63,7 @@ async function callAgent(opts: DelegateOptions & {
         cwd: opts.directory,
         model: opts.model,
         maxTurns: 10,
+        dangerouslySkipPermissions: true,
         ...(opts.agent        ? { agent: opts.agent }              : {}),
         ...(opts.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
       } as Parameters<typeof query>[0]['options'],
