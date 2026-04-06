@@ -5,7 +5,7 @@
 // Provider entries are configured via env vars:
 //   OMO_PROXY_{NAME}_TARGET_URL   — upstream endpoint (required to activate entry)
 //   OMO_PROXY_{NAME}_API_KEY      — upstream API key
-//   OMO_PROXY_{NAME}_PROTO        — "openai" (default) or "anthropic" (passthrough)
+//   OMO_PROXY_{NAME}_PROTO        — "openai" (default), "anthropic" (passthrough), or "responses"
 //   OMO_PROXY_{NAME}_PREFIXES     — comma-separated model prefixes (overrides built-in)
 //
 // Example entries: LMSTUDIO, OPENAI, GEMINI, TOGETHER, GROQ, FIREWORKS
@@ -18,7 +18,7 @@
 //   "lmstudio/qwen/qwen3.5-35b-a3b" → upstream sees "qwen/qwen3.5-35b-a3b"
 
 import { writeFileSync } from 'fs'
-import { translateRequest, translateResponse, StreamTranslator, formatSSE } from './translate.js'
+import { translateRequest, translateResponse, StreamTranslator, formatSSE, translateToResponsesRequest, translateFromResponsesResponse, ResponsesStreamTranslator } from './translate.js'
 import type { AnthropicRequest, OpenAIDelta } from './translate.js'
 
 // ---------------------------------------------------------------------------
@@ -113,7 +113,7 @@ interface ProxyEntry {
   name: string
   targetUrl: string
   apiKey: string
-  proto: 'anthropic' | 'openai'
+  proto: 'anthropic' | 'openai' | 'responses'
   prefixes: string[]
 }
 
@@ -125,6 +125,7 @@ const BUILTIN_PREFIXES: Record<string, string[]> = {
   together:   ['together/', 'meta-llama/'],
   groq:       ['groq/'],
   fireworks:  ['fireworks/', 'accounts/fireworks/'],
+  codex:      ['codex/', 'codex-', 'gpt-5.3-codex', 'gpt-3.5-codex'],
   anthropic:  ['anthropic/', 'claude-'],
 }
 
@@ -140,6 +141,7 @@ function loadProxyEntries(): Map<string, ProxyEntry> {
     // Key resolution: OMO_PROXY_{NAME}_API_KEY → well-known env var → OMO_PROXY_API_KEY → ''
     const wellKnownKey: Record<string, string | undefined> = {
       openai:    process.env.OPENAI_API_KEY,
+      codex:     process.env.OPENAI_API_KEY,
       gemini:    process.env.GEMINI_API_KEY    ?? process.env.GOOGLE_API_KEY,
       together:  process.env.TOGETHER_API_KEY,
       groq:      process.env.GROQ_API_KEY,
@@ -161,7 +163,7 @@ function loadProxyEntries(): Map<string, ProxyEntry> {
       name,
       targetUrl: value,
       apiKey,
-      proto: proto === 'anthropic' ? 'anthropic' : 'openai',
+      proto: proto === 'anthropic' ? 'anthropic' : proto === 'responses' ? 'responses' : 'openai',
       prefixes,
     })
   }
@@ -322,7 +324,97 @@ async function handleMessages(req: Request): Promise<Response> {
     }
   }
 
-  // Translate: Anthropic → OpenAI
+  // Translate: Anthropic → OpenAI Responses API
+  if (entry.proto === 'responses') {
+    const responsesBody = translateToResponsesRequest({ ...body, model: upstreamModel }, undefined)
+
+    let upstream: Response
+    try {
+      upstream = await fetch(entry.targetUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'authorization': `Bearer ${entry.apiKey}` },
+        body: JSON.stringify(responsesBody),
+      })
+    } catch (err) {
+      return anthropicError(`Upstream fetch failed: ${err}`)
+    }
+
+    if (!upstream.ok) {
+      const text = await upstream.text().catch(() => upstream.statusText)
+      return anthropicError(`Upstream error ${upstream.status}: ${text}`, upstream.status)
+    }
+
+    if (body.stream) {
+      const translator = new ResponsesStreamTranslator(upstreamModel)
+      const upstreamBody = upstream.body
+      if (!upstreamBody) return anthropicError('Upstream returned empty stream body')
+
+      const readable = new ReadableStream({
+        async start(controller) {
+          const reader = upstreamBody.getReader()
+          const decoder = new TextDecoder()
+          let buffer = ''
+          let currentEventType = ''
+          try {
+            while (true) {
+              const { done, value } = await reader.read()
+              if (done) break
+              buffer += decoder.decode(value, { stream: true })
+              const lines = buffer.split('\n')
+              buffer = lines.pop() ?? ''
+              for (const line of lines) {
+                const trimmed = line.trim()
+                if (trimmed.startsWith('event: ')) {
+                  currentEventType = trimmed.slice(7).trim()
+                } else if (trimmed.startsWith('data: ')) {
+                  try {
+                    const data = JSON.parse(trimmed.slice(6))
+                    for (const ev of translator.feedEvent(currentEventType || data.type || '', data)) {
+                      controller.enqueue(new TextEncoder().encode(formatSSE(ev)))
+                    }
+                  } catch { continue }
+                }
+              }
+            }
+            for (const ev of translator.finish()) {
+              controller.enqueue(new TextEncoder().encode(formatSSE(ev)))
+            }
+            const usage = translator.getUsage()
+            void emitProxyTokens({ provider: entry.name, model: upstreamModel, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens })
+          } catch (err) {
+            controller.error(err)
+          } finally {
+            controller.close()
+          }
+        },
+      })
+
+      return new Response(readable, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', 'connection': 'keep-alive' },
+      })
+    }
+
+    // Non-streaming Responses API
+    try {
+      const json = await upstream.json()
+      const anthropicResponse = translateFromResponsesResponse(json, upstreamModel)
+      void emitProxyTokens({
+        provider: entry.name,
+        model: upstreamModel,
+        inputTokens: anthropicResponse.usage.input_tokens,
+        outputTokens: anthropicResponse.usage.output_tokens,
+      })
+      return new Response(JSON.stringify(anthropicResponse), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    } catch (err) {
+      return anthropicError(`Response translation failed: ${err}`)
+    }
+  }
+
+  // Translate: Anthropic → OpenAI Chat Completions
   const openaiBody = translateRequest({ ...body, model: upstreamModel }, undefined)
 
   let upstream: Response

@@ -17,8 +17,12 @@ function writeOmoConfig(): void {
     writeFileSync(p, JSON.stringify(cfg, null, 2))
 
     // Render omo agents into ~/.claude/agents/ on every init so they stay current
-    const quickModel = (cfg.categories?.quick as { model?: string } | undefined)?.model ?? 'lmstudio/google/gemma-4-26b-a4b'
-    const deepModel  = (cfg.categories?.deep  as { model?: string } | undefined)?.model ?? 'anthropic/claude-opus-4-6'
+    const quickModel = process.env.OMO_CATEGORY_QUICK_MODEL
+      ?? (cfg.categories?.quick as { model?: string } | undefined)?.model
+      ?? 'claude-haiku-4-5-20251001'
+    const deepModel = process.env.OMO_CATEGORY_DEEP_MODEL
+      ?? (cfg.categories?.deep as { model?: string } | undefined)?.model
+      ?? 'claude-opus-4-6'
     renderOmoAgents({ quickModel, deepModel }).catch(err => {
       process.stderr.write(`[entry] agent render failed: ${err}\n`)
     })

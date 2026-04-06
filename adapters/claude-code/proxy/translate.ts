@@ -605,3 +605,247 @@ export class StreamTranslator {
 export function formatSSE(event: AnthropicSSEEvent): string {
   return `event: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`
 }
+
+// ---------------------------------------------------------------------------
+// OpenAI Responses API (v1/responses) — request/response translation
+// ---------------------------------------------------------------------------
+
+export interface ResponsesRequest {
+  model: string
+  input: Array<{ role: string; content: string }>
+  instructions?: string
+  max_output_tokens?: number
+  temperature?: number
+  top_p?: number
+  stream?: boolean
+  tools?: Array<{ type: 'function'; name: string; description?: string; parameters: Record<string, unknown> }>
+  store?: boolean
+}
+
+export function translateToResponsesRequest(body: AnthropicRequest, modelOverride?: string): ResponsesRequest {
+  const model = modelOverride ?? body.model
+  const input: Array<{ role: string; content: string }> = []
+
+  for (const msg of body.messages) {
+    const content = typeof msg.content === 'string'
+      ? msg.content
+      : msg.content.map(b => b.text ?? '').join('')
+    input.push({ role: msg.role, content })
+  }
+
+  const req: ResponsesRequest = { model, input, store: false }
+
+  if (body.system) req.instructions = body.system
+  if (body.max_tokens !== undefined) req.max_output_tokens = body.max_tokens
+  if (body.temperature !== undefined) req.temperature = body.temperature
+  if (body.top_p !== undefined) req.top_p = body.top_p
+  if (body.stream !== undefined) req.stream = body.stream
+
+  if (body.tools && body.tools.length > 0) {
+    req.tools = body.tools.map(t => ({
+      type: 'function' as const,
+      name: t.name,
+      ...(t.description ? { description: t.description } : {}),
+      parameters: t.input_schema,
+    }))
+  }
+
+  return req
+}
+
+export function translateFromResponsesResponse(res: {
+  id: string
+  output: Array<{
+    type: string
+    role?: string
+    content?: Array<{ type: string; text?: string; name?: string; call_id?: string; arguments?: string }>
+  }>
+  usage?: { input_tokens: number; output_tokens: number }
+  model?: string
+}, requestModel: string): AnthropicResponse {
+  const content: AnthropicContentBlock[] = []
+
+  for (const item of res.output) {
+    if (item.type === 'message' && item.content) {
+      for (const part of item.content) {
+        if (part.type === 'output_text' && part.text) {
+          content.push({ type: 'text', text: part.text })
+        }
+      }
+    }
+    if (item.type === 'function_call') {
+      const fc = item as { type: string; name?: string; call_id?: string; arguments?: string }
+      content.push({
+        type: 'tool_use',
+        id: fc.call_id ?? generateMsgId(),
+        name: fc.name ?? '',
+        input: fc.arguments ? JSON.parse(fc.arguments) : {},
+      })
+    }
+  }
+
+  if (content.length === 0) {
+    content.push({ type: 'text', text: '' })
+  }
+
+  return {
+    id: res.id,
+    type: 'message',
+    role: 'assistant',
+    model: requestModel,
+    content,
+    stop_reason: 'end_turn',
+    stop_sequence: null,
+    usage: {
+      input_tokens: res.usage?.input_tokens ?? 0,
+      output_tokens: res.usage?.output_tokens ?? 0,
+    },
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Responses API streaming translator
+// ---------------------------------------------------------------------------
+
+export class ResponsesStreamTranslator {
+  private requestModel: string
+  private messageId: string
+  private started = false
+  private textBlockOpen = false
+  private textBlockIndex = 0
+  private currentBlockIndex = 0
+  inputTokens = 0
+  outputTokens = 0
+
+  // Tool call state keyed by call_id
+  private toolCallStates = new Map<string, { name: string; blockIndex: number; argsAccum: string }>()
+
+  constructor(requestModel: string) {
+    this.requestModel = requestModel
+    this.messageId = generateMsgId()
+  }
+
+  /** Feed a Responses API SSE event. Returns Anthropic SSE events to emit. */
+  feedEvent(eventType: string, data: Record<string, unknown>): AnthropicSSEEvent[] {
+    const events: AnthropicSSEEvent[] = []
+
+    if (eventType === 'response.output_text.delta') {
+      if (!this.started) {
+        this.started = true
+        events.push({
+          event: 'message_start',
+          data: {
+            type: 'message_start',
+            message: {
+              id: this.messageId,
+              type: 'message',
+              role: 'assistant',
+              content: [],
+              model: this.requestModel,
+              stop_reason: null,
+              stop_sequence: null,
+              usage: { input_tokens: 0, output_tokens: 0 },
+            },
+          },
+        })
+        events.push({
+          event: 'content_block_start',
+          data: { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+        })
+        this.textBlockOpen = true
+        this.textBlockIndex = 0
+        this.currentBlockIndex = 0
+      }
+      const delta = String(data.delta ?? '')
+      if (delta) {
+        events.push({
+          event: 'content_block_delta',
+          data: { type: 'content_block_delta', index: this.textBlockIndex, delta: { type: 'text_delta', text: delta } },
+        })
+      }
+    }
+
+    if (eventType === 'response.function_call_arguments.delta') {
+      const callId = String(data.call_id ?? data.item_id ?? '')
+      const delta = String(data.delta ?? '')
+      const state = this.toolCallStates.get(callId)
+      if (state && delta) {
+        state.argsAccum += delta
+        events.push({
+          event: 'content_block_delta',
+          data: { type: 'content_block_delta', index: state.blockIndex, delta: { type: 'input_json_delta', partial_json: delta } },
+        })
+      }
+    }
+
+    if (eventType === 'response.output_item.added') {
+      const item = data.item as { type?: string; name?: string; call_id?: string } | undefined
+      if (item?.type === 'function_call' && item.name) {
+        if (!this.started) {
+          this.started = true
+          events.push({
+            event: 'message_start',
+            data: {
+              type: 'message_start',
+              message: {
+                id: this.messageId, type: 'message', role: 'assistant', content: [],
+                model: this.requestModel, stop_reason: null, stop_sequence: null,
+                usage: { input_tokens: 0, output_tokens: 0 },
+              },
+            },
+          })
+        }
+        if (this.textBlockOpen) {
+          events.push({ event: 'content_block_stop', data: { type: 'content_block_stop', index: this.textBlockIndex } })
+          this.textBlockOpen = false
+        }
+        this.currentBlockIndex++
+        const blockIndex = this.currentBlockIndex
+        const callId = item.call_id ?? generateMsgId()
+        this.toolCallStates.set(callId, { name: item.name, blockIndex, argsAccum: '' })
+        events.push({
+          event: 'content_block_start',
+          data: {
+            type: 'content_block_start', index: blockIndex,
+            content_block: { type: 'tool_use', id: callId, name: item.name, input: {} },
+          },
+        })
+      }
+    }
+
+    if (eventType === 'response.completed') {
+      const usage = data.response && typeof data.response === 'object'
+        ? (data.response as { usage?: { input_tokens?: number; output_tokens?: number } }).usage
+        : undefined
+      if (usage) {
+        this.inputTokens = usage.input_tokens ?? 0
+        this.outputTokens = usage.output_tokens ?? 0
+      }
+    }
+
+    return events
+  }
+
+  /** Finalize the stream — close open blocks and emit stop events. */
+  finish(): AnthropicSSEEvent[] {
+    const events: AnthropicSSEEvent[] = []
+    if (this.textBlockOpen) {
+      events.push({ event: 'content_block_stop', data: { type: 'content_block_stop', index: this.textBlockIndex } })
+      this.textBlockOpen = false
+    }
+    for (const [, state] of this.toolCallStates) {
+      events.push({ event: 'content_block_stop', data: { type: 'content_block_stop', index: state.blockIndex } })
+    }
+    this.toolCallStates.clear()
+    events.push({
+      event: 'message_delta',
+      data: { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: this.outputTokens } },
+    })
+    events.push({ event: 'message_stop', data: { type: 'message_stop' } })
+    return events
+  }
+
+  getUsage(): { inputTokens: number; outputTokens: number } {
+    return { inputTokens: this.inputTokens, outputTokens: this.outputTokens }
+  }
+}

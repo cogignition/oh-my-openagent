@@ -26,6 +26,15 @@ spec:
             "includeAll": true,
             "multi": true,
             "current": { "text": "All", "value": "$__all" }
+          },
+          {
+            "name": "agent",
+            "type": "query",
+            "datasource": { "type": "prometheus", "uid": "prometheus" },
+            "query": "label_values(omo_agent_tokens_total, agent)",
+            "includeAll": true,
+            "multi": true,
+            "current": { "text": "All", "value": "$__all" }
           }
         ]
       },
@@ -304,6 +313,69 @@ spec:
             }
           ],
           "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "blue" } } }
+        },
+        {
+          "id": 18,
+          "type": "row",
+          "title": "Agent Tokens",
+          "gridPos": { "x": 0, "y": 40, "w": 24, "h": 1 }
+        },
+        {
+          "id": 19,
+          "title": "Agent Tokens / min",
+          "description": "Output tokens/min for each omo agent, broken down by agent name.",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 41, "w": 14, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum by (agent) (rate(omo_agent_tokens_total{direction=\"output\"}[5m]) * 60)",
+              "legendFormat": "{{agent}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "short", "custom": { "fillOpacity": 10 } }
+          }
+        },
+        {
+          "id": 20,
+          "title": "Agent Tokens — by agent",
+          "description": "Total output tokens consumed per omo agent.",
+          "type": "bargauge",
+          "gridPos": { "x": 14, "y": 41, "w": 5, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum by (agent) (omo_agent_tokens_total{direction=\"output\"})",
+              "legendFormat": "{{agent}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "short", "color": { "mode": "palette-classic" } }
+          },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "orientation": "horizontal",
+            "displayMode": "basic"
+          }
+        },
+        {
+          "id": 21,
+          "title": "Agent Token Totals",
+          "type": "stat",
+          "gridPos": { "x": 19, "y": 41, "w": 5, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum(omo_agent_tokens_total{direction=\"input\"}) or vector(0)",
+              "legendFormat": "Input"
+            },
+            {
+              "expr": "sum(omo_agent_tokens_total{direction=\"output\"}) or vector(0)",
+              "legendFormat": "Output"
+            }
+          ],
+          "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "palette-classic" } } }
         }
       ]
     }

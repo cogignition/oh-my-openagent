@@ -20,6 +20,8 @@ export type DispatchTarget =
   | { handler: 'tool.execute.before'; input: { tool: string; sessionID: string; callID: string }; output: { args: Record<string, unknown> } }
   | { handler: 'tool.execute.after'; input: { tool: string; sessionID: string; callID: string; [key: string]: unknown }; output: Record<string, unknown> }
   | { handler: 'experimental.session.compacting'; input: { sessionID: string }; output: { context: string[] } }
+  | { handler: 'subagent.start'; input: { agentType: string; agentId: string; sessionID: string }; output: Record<string, unknown> }
+  | { handler: 'subagent.stop'; input: { agentType: string; agentId: string; sessionID: string; transcriptPath?: string }; output: Record<string, unknown> }
   | { handler: 'skip' }
 
 function makeEvent(type: string, sessionID: string, extra?: Record<string, unknown>): { event: OmoEvent } {
@@ -81,7 +83,29 @@ export function mapEvent(raw: ClaudeCodeInput): DispatchTarget {
       return { handler: 'event', input: makeEvent('session.ended', sessionID), output: {} }
 
     case 'SubagentStart':
+      return {
+        handler: 'subagent.start',
+        input: {
+          agentType: String(raw.agent_type ?? ''),
+          agentId: String(raw.agent_id ?? ''),
+          sessionID,
+        },
+        output: {},
+      }
+
     case 'SubagentStop':
+      return {
+        handler: 'subagent.stop',
+        input: {
+          agentType: String(raw.agent_type ?? ''),
+          agentId: String(raw.agent_id ?? ''),
+          sessionID,
+          transcriptPath: typeof raw.agent_transcript_path === 'string'
+            ? raw.agent_transcript_path : undefined,
+        },
+        output: {},
+      }
+
     case 'PermissionRequest':
       return { handler: 'skip' }
 

@@ -13,7 +13,17 @@ export interface RenderOmoAgentsOpts {
 }
 
 // Agents that should use the quick/subagent model
-const QUICK_AGENTS = new Set(['sisyphus-junior', 'explore', 'librarian', 'metis', 'momus'])
+const QUICK_AGENTS = new Set(['sisyphus-junior', 'explore', 'librarian', 'metis', 'momus', 'sisyphus', 'atlas'])
+
+// Per-agent model overrides (takes precedence over quick/deep assignment)
+// Agents not listed here use quickModel (if in QUICK_AGENTS) or deepModel.
+const AGENT_MODEL_OVERRIDES: Record<string, string> = {
+  atlas:             'gpt-5.3-codex',
+  librarian:         'claude-haiku-4-5-20251001',
+  metis:             'claude-haiku-4-5-20251001',
+  momus:             'claude-haiku-4-5-20251001',
+  'sisyphus-junior': 'claude-haiku-4-5-20251001',
+}
 
 // Agents to skip entirely (require capabilities not available in all environments)
 const SKIP_AGENTS = new Set(['multimodal-looker'])
@@ -44,9 +54,8 @@ export async function renderOmoAgents(opts: RenderOmoAgentsOpts): Promise<void> 
     if (SKIP_AGENTS.has(name)) continue
 
     try {
-      const model = QUICK_AGENTS.has(name)
-        ? stripProviderPrefix(quickModel)
-        : stripProviderPrefix(deepModel)
+      const model = AGENT_MODEL_OVERRIDES[name]
+        ?? (QUICK_AGENTS.has(name) ? stripProviderPrefix(quickModel) : stripProviderPrefix(deepModel))
 
       const frontmatter = [
         '---',

@@ -17,6 +17,10 @@
  *   omo_delegate_calls_total       — counter  {category, model, status}
  *   omo_delegate_latency_ms        — histogram {category, model}
  *   omo_lm_studio_fallbacks_total  — counter  {category, reason}
+ *   omo_agent_tokens_total         — counter  {agent, model, direction}
+ *     Per-agent token usage (omo-oracle, omo-explore, etc.) read on SubagentStop.
+ *   omo_classifier_decisions_total — counter  {decision, model}
+ *     Auto-classifier routing decisions (quick vs pass).
  */
 
 import { MeterProvider, PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics'
@@ -76,6 +80,8 @@ let _delegateLatency: Histogram | null = null
 let _delegateTokens: Counter | null = null
 let _sessionTokens: Counter | null = null
 let _fallbackCounter: Counter | null = null
+let _agentTokens: Counter | null = null
+let _classifierCounter: Counter | null = null
 
 function hookCounter(): Counter | null {
   if (_hookCounter) return _hookCounter
@@ -140,6 +146,26 @@ function fallbackCounter(): Counter | null {
   return _fallbackCounter
 }
 
+function agentTokens(): Counter | null {
+  if (_agentTokens) return _agentTokens
+  const m = getMeter()
+  if (!m) return null
+  _agentTokens = m.createCounter('omo_agent_tokens_total', {
+    description: 'Tokens consumed by omo agent invocations',
+  })
+  return _agentTokens
+}
+
+function classifierCounter(): Counter | null {
+  if (_classifierCounter) return _classifierCounter
+  const m = getMeter()
+  if (!m) return null
+  _classifierCounter = m.createCounter('omo_classifier_decisions_total', {
+    description: 'Auto-classifier routing decisions',
+  })
+  return _classifierCounter
+}
+
 // Public API — all no-op when metrics disabled
 
 export function recordHookEvent(eventName: string, routed = false): void {
@@ -180,6 +206,29 @@ export function recordSessionTokens(opts: {
 
 export function recordFallback(category: string, reason: string): void {
   try { fallbackCounter()?.add(1, { category, reason }) } catch {}
+}
+
+export function recordAgentTokens(opts: {
+  agent: string
+  model: string
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens?: number
+}): void {
+  const { agent, model, inputTokens, outputTokens, cacheReadTokens } = opts
+  try {
+    if (inputTokens)      agentTokens()?.add(inputTokens,      { direction: 'input',      agent, model })
+    if (outputTokens)     agentTokens()?.add(outputTokens,     { direction: 'output',     agent, model })
+    if (cacheReadTokens)  agentTokens()?.add(cacheReadTokens,  { direction: 'cache_read', agent, model })
+  } catch {}
+}
+
+export function recordClassifierDecision(opts: {
+  decision: 'quick' | 'pass'
+  latencyMs: number
+  model: string
+}): void {
+  try { classifierCounter()?.add(1, { decision: opts.decision, model: opts.model }) } catch {}
 }
 
 /** Force-flush pending metrics without shutting down the provider. */

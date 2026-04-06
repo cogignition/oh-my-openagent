@@ -1,10 +1,10 @@
 import { readStdin } from './stdin-reader.js'
 import { mapEvent, type ClaudeCodeInput } from './event-mapper.js'
 import { getPlugin } from './entry.js'
-import { recordHookEvent, recordSessionTokens, flush, shutdown } from './metrics.js'
-import { classifyPrompt } from './prompt-router.js'
+import { recordHookEvent, recordSessionTokens, recordAgentTokens, flush, shutdown } from './metrics.js'
+import { classifyPrompt, autoClassifyPrompt } from './prompt-router.js'
 import { runHeadlessDelegate } from './headless-delegate.js'
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync } from 'fs'
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, unlinkSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 
@@ -67,6 +67,11 @@ function listProjectJSONLs(dir: string): Array<{ path: string; sessionId: string
 }
 
 const STATE_DIR = join(homedir(), '.claude', 'tmp', 'omo-session-state')
+const AGENT_STATE_DIR = join(homedir(), '.claude', 'tmp', 'omo-agent-state')
+
+function isOmoAgent(agentType: string): boolean {
+  return agentType.startsWith('omo-')
+}
 
 interface SessionState {
   inputTokens: number
@@ -133,6 +138,35 @@ async function captureSessionTokens(sessionId: string, dir: string): Promise<voi
   }
 }
 
+// ---------------------------------------------------------------------------
+// Agent token tracking — reads agent JSONL on SubagentStop
+// ---------------------------------------------------------------------------
+
+function processAgentTokens(agentType: string, agentId: string, raw: ClaudeCodeInput): void {
+  // Try agent_transcript_path first (provided by Claude Code on SubagentStop)
+  const transcriptPath = typeof raw.agent_transcript_path === 'string'
+    ? raw.agent_transcript_path : undefined
+
+  if (transcriptPath) {
+    const usage = readJSONLUsage(transcriptPath)
+    if (usage) {
+      recordAgentTokens({ agent: agentType, model: usage.model, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cacheReadTokens: usage.cacheReadTokens })
+      return
+    }
+  }
+
+  // Fallback: scan project JSONLs for a file matching the agent's session ID
+  const dir = raw.directory ? String(raw.directory) : process.cwd()
+  const files = listProjectJSONLs(dir)
+  const agentFile = files.find(f => f.sessionId === agentId)
+  if (agentFile) {
+    const usage = readJSONLUsage(agentFile.path)
+    if (usage) {
+      recordAgentTokens({ agent: agentType, model: usage.model, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cacheReadTokens: usage.cacheReadTokens })
+    }
+  }
+}
+
 export async function run(): Promise<void> {
   const raw = await readStdin()
   let parsed: ClaudeCodeInput = { hook_event_name: 'Unknown' }
@@ -149,16 +183,17 @@ export async function run(): Promise<void> {
     })
   }
 
-  // Prompt routing: intercept UserPromptSubmit with known prefixes (@quick, @local, @deep, etc.)
+  // Prompt routing: intercept UserPromptSubmit with explicit prefixes or auto-classification
   if (parsed.hook_event_name === 'UserPromptSubmit') {
     const prompt = typeof parsed.prompt === 'string' ? parsed.prompt : ''
-    const decision = classifyPrompt(prompt)
+    let decision = classifyPrompt(prompt)        // sync prefix check first
+    if (decision.route === 'pass') {
+      decision = await autoClassifyPrompt(prompt) // async classifier fallback
+    }
     if (decision.route !== 'pass') {
       recordHookEvent(parsed.hook_event_name, true)
       try {
         const result = await runHeadlessDelegate({ task: decision.prompt, category: decision.route, directory })
-        // Flush metrics before writing response — Claude Code may kill the process
-        // immediately after reading stdout, so the finally() flush may never run.
         await flush()
         process.stdout.write(JSON.stringify({ continue: false, stopReason: result }) + '\n')
       } catch (err) {
@@ -167,6 +202,27 @@ export async function run(): Promise<void> {
         process.stdout.write(JSON.stringify({ continue: true }) + '\n')
       }
       return
+    }
+  }
+
+  // Agent token tracking: persist agent info on start, read tokens on stop
+  if (parsed.hook_event_name === 'SubagentStart') {
+    const agentType = String(parsed.agent_type ?? '')
+    const agentId = String(parsed.agent_id ?? '')
+    if (isOmoAgent(agentType) && agentId) {
+      try {
+        mkdirSync(AGENT_STATE_DIR, { recursive: true })
+        writeFileSync(join(AGENT_STATE_DIR, `${agentId}.json`), JSON.stringify({ agentType, startedAt: Date.now() }))
+      } catch { /* best-effort */ }
+    }
+  }
+
+  if (parsed.hook_event_name === 'SubagentStop') {
+    const agentType = String(parsed.agent_type ?? '')
+    const agentId = String(parsed.agent_id ?? '')
+    if (isOmoAgent(agentType) && agentId) {
+      processAgentTokens(agentType, agentId, parsed)
+      try { unlinkSync(join(AGENT_STATE_DIR, `${agentId}.json`)) } catch { /* ok if missing */ }
     }
   }
 
@@ -179,7 +235,9 @@ export async function run(): Promise<void> {
 
   recordHookEvent(parsed.hook_event_name)
 
-  if (target.handler === 'skip') {
+  // Fast-path: skip events that don't need the full plugin, and PreCompact
+  // which can cause a feedback loop (context injection → compaction → repeat).
+  if (target.handler === 'skip' || target.handler === 'experimental.session.compacting') {
     process.stdout.write(JSON.stringify({ continue: true }) + '\n')
     return
   }
