@@ -62,7 +62,7 @@ export async function renderOmoAgents(opts: RenderOmoAgentsOpts): Promise<void> 
       const frontmatter = [
         '---',
         `name: omo-${name}`,
-        `description: "${(config.description ?? '').replace(/"/g, '\\"')}"`,
+        `description: "${(config.description ?? '').replace(/"/g, '\\"')} [${model}]"`,
         `model: ${model}`,
         '---',
       ].join('\n')
