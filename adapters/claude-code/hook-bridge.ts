@@ -4,7 +4,7 @@ import { getPlugin } from './entry.js'
 import { recordHookEvent, recordSessionTokens, flush, shutdown } from './metrics.js'
 import { classifyPrompt } from './prompt-router.js'
 import { runHeadlessDelegate } from './headless-delegate.js'
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs'
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 
@@ -22,39 +22,47 @@ function encodeProjectPath(dir: string): string {
   return dir.replace(/[^a-zA-Z0-9]/g, '-')
 }
 
-interface AssistantUsage {
+interface SessionUsage {
   model: string
   inputTokens: number
   outputTokens: number
   cacheReadTokens: number
 }
 
-/** Read the session JSONL and sum all assistant message token usage. */
-function readSessionUsage(sessionId: string, dir: string): AssistantUsage | null {
+/** Sum all assistant message token usage from a single JSONL file. */
+function readJSONLUsage(filePath: string): SessionUsage | null {
   try {
-    const encoded  = encodeProjectPath(dir)
-    const filePath = join(homedir(), '.claude', 'projects', encoded, `${sessionId}.jsonl`)
-    if (!existsSync(filePath)) return null
-
     const content = readFileSync(filePath, 'utf-8')
     let inputTokens = 0, outputTokens = 0, cacheReadTokens = 0, model = ''
-
     for (const line of content.split('\n')) {
       if (!line.trim()) continue
       try {
         const msg = JSON.parse(line)
         if (msg.type !== 'assistant' || !msg.message?.usage) continue
         const u = msg.message.usage
-        inputTokens      += (u.input_tokens               ?? 0)
-        outputTokens     += (u.output_tokens              ?? 0)
-        cacheReadTokens  += (u.cache_read_input_tokens    ?? 0)
+        inputTokens      += (u.input_tokens            ?? 0)
+        outputTokens     += (u.output_tokens           ?? 0)
+        cacheReadTokens  += (u.cache_read_input_tokens ?? 0)
         if (msg.message.model) model = msg.message.model
       } catch { /* skip malformed lines */ }
     }
-
-    return { model: model || 'unknown', inputTokens, outputTokens, cacheReadTokens }
+    return model ? { model, inputTokens, outputTokens, cacheReadTokens } : null
   } catch {
     return null
+  }
+}
+
+/** Return all JSONL file paths in the project directory for the given cwd. */
+function listProjectJSONLs(dir: string): Array<{ path: string; sessionId: string }> {
+  try {
+    const encoded = encodeProjectPath(dir)
+    const projectDir = join(homedir(), '.claude', 'projects', encoded)
+    if (!existsSync(projectDir)) return []
+    return readdirSync(projectDir)
+      .filter(f => f.endsWith('.jsonl'))
+      .map(f => ({ path: join(projectDir, f), sessionId: f.replace(/\.jsonl$/, '') }))
+  } catch {
+    return []
   }
 }
 
@@ -82,31 +90,43 @@ function saveSessionState(sessionId: string, state: SessionState): void {
   } catch { /* best-effort */ }
 }
 
-async function captureSessionTokens(sessionId: string, dir: string): Promise<void> {
-  const current = readSessionUsage(sessionId, dir)
+/** Emit delta tokens for a single JSONL file (main session or delegate sub-session). */
+function processJSONL(filePath: string, fileSessionId: string, mainSessionId: string): void {
+  const current = readJSONLUsage(filePath)
   if (!current) return
 
-  const prev   = loadSessionState(sessionId)
-
-  // Compute deltas — clamp to 0 to handle compaction (cumulative can drop after compact)
+  const prev = loadSessionState(fileSessionId)
   const deltaInput     = Math.max(0, current.inputTokens     - prev.inputTokens)
   const deltaOutput    = Math.max(0, current.outputTokens    - prev.outputTokens)
   const deltaCacheRead = Math.max(0, current.cacheReadTokens - prev.cacheReadTokens)
 
   if (deltaInput || deltaOutput || deltaCacheRead) {
+    const source = fileSessionId === mainSessionId ? 'session' : 'delegate'
     recordSessionTokens({
       model:           current.model,
+      source,
       inputTokens:     deltaInput,
       outputTokens:    deltaOutput,
       cacheReadTokens: deltaCacheRead,
     })
   }
 
-  saveSessionState(sessionId, {
+  saveSessionState(fileSessionId, {
     inputTokens:     current.inputTokens,
     outputTokens:    current.outputTokens,
     cacheReadTokens: current.cacheReadTokens,
   })
+}
+
+async function captureSessionTokens(sessionId: string, dir: string): Promise<void> {
+  // Scan all JSONL files in the project directory — includes the main session
+  // (source=session) and any delegate sub-sessions spawned by @quick/@deep calls
+  // (source=delegate). Each file gets independent delta tracking so we only emit
+  // the increment since the last Stop.
+  const files = listProjectJSONLs(dir)
+  for (const { path, sessionId: fileSessionId } of files) {
+    processJSONL(path, fileSessionId, sessionId)
+  }
 }
 
 export async function run(): Promise<void> {

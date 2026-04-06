@@ -216,28 +216,24 @@ spec:
         {
           "id": 13,
           "type": "row",
-          "title": "Token Usage — three discrete metrics",
+          "title": "Token Usage",
           "gridPos": { "x": 0, "y": 31, "w": 24, "h": 1 }
         },
         {
           "id": 14,
-          "title": "Tokens / min (all sources)",
-          "description": "session=main Claude Code session · proxy=delegate quick (OpenAI/LM Studio) · delegate=delegate deep (Anthropic SDK)",
+          "title": "Tokens / min",
+          "description": "Output tokens/min for main session and each delegate model. Cache-read excluded.",
           "type": "timeseries",
-          "gridPos": { "x": 0, "y": 32, "w": 16, "h": 8 },
+          "gridPos": { "x": 0, "y": 32, "w": 14, "h": 8 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [
             {
-              "expr": "sum by (direction, model) (rate(omo_session_tokens_total[5m]) * 60)",
-              "legendFormat": "session {{direction}} / {{model}}"
+              "expr": "sum by (model) (rate(omo_session_tokens_total{source=\"session\",direction=\"output\"}[5m]) * 60)",
+              "legendFormat": "main / {{model}}"
             },
             {
-              "expr": "sum by (direction, model) (rate(omo_proxy_tokens_total[5m]) * 60)",
-              "legendFormat": "proxy {{direction}} / {{model}}"
-            },
-            {
-              "expr": "sum by (direction, model) (rate(omo_delegate_tokens_total[5m]) * 60)",
-              "legendFormat": "delegate {{direction}} / {{model}}"
+              "expr": "sum by (model) (rate(omo_session_tokens_total{source=\"delegate\",direction=\"output\"}[5m]) * 60)",
+              "legendFormat": "delegate / {{model}}"
             }
           ],
           "fieldConfig": {
@@ -246,18 +242,18 @@ spec:
         },
         {
           "id": 15,
-          "title": "Session Tokens (main)",
-          "description": "omo_session_tokens_total — main Claude Code session ↔ Anthropic, read from session JSONL on Stop",
+          "title": "Session Tokens — main",
+          "description": "Direct Anthropic calls by the main Claude Code session (input / output, cache-read excluded)",
           "type": "stat",
-          "gridPos": { "x": 16, "y": 32, "w": 4, "h": 4 },
+          "gridPos": { "x": 14, "y": 32, "w": 5, "h": 4 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [
             {
-              "expr": "sum(omo_session_tokens_total{direction=\"input\"}) or vector(0)",
+              "expr": "sum(omo_session_tokens_total{source=\"session\",direction=\"input\"}) or vector(0)",
               "legendFormat": "Input"
             },
             {
-              "expr": "sum(omo_session_tokens_total{direction=\"output\"}) or vector(0)",
+              "expr": "sum(omo_session_tokens_total{source=\"session\",direction=\"output\"}) or vector(0)",
               "legendFormat": "Output"
             }
           ],
@@ -265,60 +261,15 @@ spec:
         },
         {
           "id": 16,
-          "title": "Proxy Tokens (delegate quick)",
-          "description": "omo_proxy_tokens_total — @quick delegate calls → OpenAI / LM Studio via the omo proxy",
-          "type": "stat",
-          "gridPos": { "x": 20, "y": 32, "w": 4, "h": 4 },
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "targets": [
-            {
-              "expr": "sum(omo_proxy_tokens_total{direction=\"input\"}) or vector(0)",
-              "legendFormat": "Input"
-            },
-            {
-              "expr": "sum(omo_proxy_tokens_total{direction=\"output\"}) or vector(0)",
-              "legendFormat": "Output"
-            }
-          ],
-          "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "palette-classic" } } }
-        },
-        {
-          "id": 18,
-          "title": "Delegate Tokens (deep)",
-          "description": "omo_delegate_tokens_total — @deep delegate calls, token counts from the Anthropic SDK",
-          "type": "stat",
-          "gridPos": { "x": 16, "y": 36, "w": 4, "h": 4 },
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "targets": [
-            {
-              "expr": "sum(omo_delegate_tokens_total{direction=\"input\"}) or vector(0)",
-              "legendFormat": "Input"
-            },
-            {
-              "expr": "sum(omo_delegate_tokens_total{direction=\"output\"}) or vector(0)",
-              "legendFormat": "Output"
-            }
-          ],
-          "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "palette-classic" } } }
-        },
-        {
-          "id": 17,
-          "title": "Tokens by Model (all sources)",
+          "title": "Delegate Tokens — by model",
+          "description": "Tokens consumed by @quick / @deep delegate calls, broken down by the model used. Each bar = one delegate model.",
           "type": "bargauge",
-          "gridPos": { "x": 20, "y": 36, "w": 4, "h": 4 },
+          "gridPos": { "x": 19, "y": 32, "w": 5, "h": 8 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "targets": [
             {
-              "expr": "sum by (model) (omo_session_tokens_total)",
-              "legendFormat": "session/{{model}}"
-            },
-            {
-              "expr": "sum by (model) (omo_proxy_tokens_total)",
-              "legendFormat": "proxy/{{model}}"
-            },
-            {
-              "expr": "sum by (model) (omo_delegate_tokens_total)",
-              "legendFormat": "delegate/{{model}}"
+              "expr": "sum by (model) (omo_session_tokens_total{source=\"delegate\",direction=\"output\"})",
+              "legendFormat": "{{model}}"
             }
           ],
           "fieldConfig": {
@@ -330,6 +281,21 @@ spec:
             "orientation": "horizontal",
             "displayMode": "basic"
           }
+        },
+        {
+          "id": 17,
+          "title": "Session Cache Read",
+          "description": "cache_read_input_tokens for the main session — tokens served from Anthropic's prompt cache (not billed at full rate)",
+          "type": "stat",
+          "gridPos": { "x": 14, "y": 36, "w": 5, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum(omo_session_tokens_total{source=\"session\",direction=\"cache_read\"}) or vector(0)",
+              "legendFormat": "Cache Read"
+            }
+          ],
+          "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "blue" } } }
         }
       ]
     }

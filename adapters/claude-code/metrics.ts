@@ -163,15 +163,16 @@ export function recordDelegateCall(opts: {
 
 export function recordSessionTokens(opts: {
   model: string
+  source: 'session' | 'delegate'
   inputTokens: number
   outputTokens: number
   cacheReadTokens?: number
 }): void {
-  const { model, inputTokens, outputTokens, cacheReadTokens } = opts
+  const { model, source, inputTokens, outputTokens, cacheReadTokens } = opts
   try {
-    if (inputTokens)      sessionTokens()?.add(inputTokens,      { direction: 'input',      model })
-    if (outputTokens)     sessionTokens()?.add(outputTokens,     { direction: 'output',     model })
-    if (cacheReadTokens)  sessionTokens()?.add(cacheReadTokens,  { direction: 'cache_read', model })
+    if (inputTokens)      sessionTokens()?.add(inputTokens,      { direction: 'input',      model, source })
+    if (outputTokens)     sessionTokens()?.add(outputTokens,     { direction: 'output',     model, source })
+    if (cacheReadTokens)  sessionTokens()?.add(cacheReadTokens,  { direction: 'cache_read', model, source })
   } catch {}
 }
 
