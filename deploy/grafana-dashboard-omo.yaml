@@ -212,6 +212,78 @@ spec:
               }
             }
           }
+        },
+        {
+          "id": 13,
+          "type": "row",
+          "title": "Token Usage",
+          "gridPos": { "x": 0, "y": 31, "w": 24, "h": 1 }
+        },
+        {
+          "id": 14,
+          "title": "Tokens / min",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 32, "w": 12, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum by (direction, model) (rate(omo_delegate_tokens_total{category=~\"$category\"}[1m]) * 60)",
+              "legendFormat": "{{direction}} / {{model}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "short", "custom": { "fillOpacity": 10 } }
+          }
+        },
+        {
+          "id": 15,
+          "title": "Input vs Output Tokens",
+          "type": "piechart",
+          "gridPos": { "x": 12, "y": 32, "w": 6, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum by (direction) (omo_delegate_tokens_total)",
+              "legendFormat": "{{direction}}"
+            }
+          ],
+          "fieldConfig": { "defaults": { "unit": "short" } }
+        },
+        {
+          "id": 16,
+          "title": "Total Tokens",
+          "type": "stat",
+          "gridPos": { "x": 18, "y": 32, "w": 6, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum(omo_delegate_tokens_total{direction=\"input\"}) or vector(0)",
+              "legendFormat": "Input"
+            },
+            {
+              "expr": "sum(omo_delegate_tokens_total{direction=\"output\"}) or vector(0)",
+              "legendFormat": "Output"
+            }
+          ],
+          "fieldConfig": { "defaults": { "unit": "short" } }
+        },
+        {
+          "id": 17,
+          "title": "Tokens by Model",
+          "type": "bargauge",
+          "gridPos": { "x": 18, "y": 36, "w": 6, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum by (model) (omo_delegate_tokens_total)",
+              "legendFormat": "{{model}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "short" },
+            "overrides": []
+          },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "horizontal" }
         }
       ]
     }
