@@ -63,7 +63,10 @@ async function callAgent(opts: DelegateOptions & {
         cwd: opts.directory,
         model: opts.model,
         maxTurns: 10,
-        dangerouslySkipPermissions: true,
+        // Auto-allow read-only tools — no more than what the spawning session has,
+        // but avoids blocking on approval prompts in a headless context.
+        // Write/Edit/Bash are intentionally excluded for quick delegates.
+        allowedTools: ['Read', 'Glob', 'Grep', 'LS'],
         ...(opts.agent        ? { agent: opts.agent }              : {}),
         ...(opts.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
       } as Parameters<typeof query>[0]['options'],
