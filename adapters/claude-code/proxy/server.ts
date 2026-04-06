@@ -56,7 +56,19 @@ function loadProxyEntries(): Map<string, ProxyEntry> {
     if (!m || !value) continue
     const name = m[1].toLowerCase()
 
-    const apiKey  = process.env[`OMO_PROXY_${m[1]}_API_KEY`]    ?? ''
+    // Key resolution: OMO_PROXY_{NAME}_API_KEY → well-known env var → OMO_PROXY_API_KEY → ''
+    const wellKnownKey: Record<string, string | undefined> = {
+      openai:    process.env.OPENAI_API_KEY,
+      gemini:    process.env.GEMINI_API_KEY    ?? process.env.GOOGLE_API_KEY,
+      together:  process.env.TOGETHER_API_KEY,
+      groq:      process.env.GROQ_API_KEY,
+      fireworks: process.env.FIREWORKS_API_KEY,
+      anthropic: process.env.ANTHROPIC_API_KEY,
+    }
+    const apiKey  = process.env[`OMO_PROXY_${m[1]}_API_KEY`]
+      ?? wellKnownKey[name]
+      ?? process.env.OMO_PROXY_API_KEY
+      ?? ''
     const proto   = (process.env[`OMO_PROXY_${m[1]}_PROTO`]     ?? 'openai').toLowerCase()
     const rawPfx  = process.env[`OMO_PROXY_${m[1]}_PREFIXES`]
 
