@@ -13,7 +13,7 @@
  */
 
 import { MeterProvider, PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics'
-import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http'
+import { OTLPMetricExporter, AggregationTemporalityPreference } from '@opentelemetry/exporter-metrics-otlp-http'
 import { resourceFromAttributes } from '@opentelemetry/resources'
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions'
 import type { Counter, Histogram, Meter } from '@opentelemetry/api'
@@ -30,9 +30,14 @@ function getMeter(): Meter | null {
   if (_meter) return _meter
 
   try {
+    // Delta temporality: each short-lived hook process exports its increment
+    // rather than a cumulative sum from its own start. Without this, every
+    // fresh process exports cumulative=1, the collector sees no change, and
+    // rate() stays 0 forever.
     const exporter = new OTLPMetricExporter({
       url: `${ENDPOINT}/v1/metrics`,
       headers: {},
+      temporalityPreference: AggregationTemporalityPreference.DELTA,
     })
 
     _provider = new MeterProvider({
